@@ -1,8 +1,10 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppModule as AppFeatureModule } from '../src/modules/app/app.module';
+import { AuthModule } from '../src/modules/auth/auth.module';
 import * as dotenv from 'dotenv';
 dotenv.config();
+
 @Module({
   imports: [
     TypeOrmModule.forRoot({
@@ -16,6 +18,7 @@ dotenv.config();
       synchronize: true, // Set to false in production
     }),
     AppFeatureModule,
+    AuthModule,
   ],
 })
 export class AppModule {}
