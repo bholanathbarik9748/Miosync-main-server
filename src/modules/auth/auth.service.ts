@@ -16,6 +16,8 @@ interface UserRow {
   password?: string;
   firstName: string;
   lastName: string;
+  userType: string;
+  phoneNumber: string;
   isActive?: boolean;
   createdAt?: Date;
   updatedAt?: Date;
@@ -29,12 +31,13 @@ export class AuthService {
     private jwtService: JwtService,
   ) {}
 
-  async register(registerDto: RegisterDto): Promise<AuthResponseDto> {
-    const { email, password, firstName, lastName } = registerDto;
+  async register(registerDto: RegisterDto): Promise<any> {
+    const { email, password, firstName, lastName, phoneNumber, userType } =
+      registerDto;
 
     // Check if user already exists using raw SQL
     const existingUser: UserRow[] = await this.userRepository.query(
-      'SELECT id, email FROM "user" WHERE email = $1',
+      'SELECT id, email FROM "users" WHERE email = $1',
       [email],
     );
 
@@ -47,8 +50,8 @@ export class AuthService {
 
     // Create new user using raw SQL
     const insertResult: UserRow[] = await this.userRepository.query(
-      'INSERT INTO "user" (email, password, "firstName", "lastName", "isActive", "createdAt", "updatedAt") VALUES ($1, $2, $3, $4, $5, NOW(), NOW()) RETURNING id, email, "firstName", "lastName"',
-      [email, hashedPassword, firstName, lastName, true],
+      'INSERT INTO "users" (email, password, "firstName", "lastName", "phoneNumber", "userType","isActive", "createdAt", "updatedAt") VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW()) RETURNING id, email, "firstName", "lastName", "phoneNumber"',
+      [email, hashedPassword, firstName, lastName, phoneNumber, userType, true],
     );
 
     const savedUser: UserRow = insertResult[0];
@@ -64,16 +67,17 @@ export class AuthService {
         email: savedUser.email,
         firstName: savedUser.firstName,
         lastName: savedUser.lastName,
+        phoneNumber: savedUser.phoneNumber,
       },
     };
   }
 
-  async login(loginDto: LoginDto): Promise<AuthResponseDto> {
+  async login(loginDto: LoginDto): Promise<any> {
     const { email, password } = loginDto;
 
     // Find user using raw SQL
     const users: UserRow[] = await this.userRepository.query(
-      'SELECT id, email, password, "firstName", "lastName" FROM "user" WHERE email = $1',
+      'SELECT id, email, password, "firstName", "lastName" FROM "users" WHERE email = $1',
       [email],
     );
 
@@ -105,7 +109,7 @@ export class AuthService {
   async validateUser(email: string, password: string): Promise<any> {
     // Find user using raw SQL
     const users: UserRow[] = await this.userRepository.query(
-      'SELECT id, email, password, "firstName", "lastName", "isActive", "createdAt", "updatedAt" FROM "user" WHERE email = $1',
+      'SELECT id, email, password, "firstName", "lastName", "isActive", "createdAt", "updatedAt" FROM "users" WHERE email = $1',
       [email],
     );
 
@@ -128,7 +132,7 @@ export class AuthService {
   async getProfile(userId: number): Promise<any> {
     // Get user profile using raw SQL
     const users: UserRow[] = await this.userRepository.query(
-      'SELECT id, email, "firstName", "lastName", "isActive", "createdAt", "updatedAt" FROM "user" WHERE id = $1',
+      'SELECT id, email, "firstName", "lastName", "phoneNumber","isActive", "createdAt", "updatedAt" FROM "users" WHERE id = $1',
       [userId],
     );
 

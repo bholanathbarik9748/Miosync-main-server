@@ -1,4 +1,10 @@
-import { IsEmail, IsString, MinLength, IsNotEmpty } from 'class-validator';
+import {
+  IsEmail,
+  IsString,
+  MinLength,
+  IsNotEmpty,
+  IsIn,
+} from 'class-validator';
 
 export class LoginDto {
   @IsEmail()
@@ -24,14 +30,24 @@ export class RegisterDto {
   @IsString()
   @IsNotEmpty()
   lastName: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @IsIn(['admin', 'superAdmin'])
+  userType: 'admin' | 'superAdmin';
+
+  @IsString()
+  @IsNotEmpty()
+  phoneNumber: string;
 }
 
 export class AuthResponseDto {
   access_token: string;
   user: {
-    id: number;
+    id: string;
     email: string;
     firstName: string;
     lastName: string;
+    phoneNumber: string;
   };
 }

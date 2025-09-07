@@ -1,9 +1,15 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+} from 'typeorm';
 
-@Entity('user')
+@Entity('users')
 export class User {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid') // Changed to UUID
+  id: string; // Changed from number to string
 
   @Column({ unique: true })
   email: string;
@@ -16,6 +22,15 @@ export class User {
 
   @Column()
   lastName: string;
+
+  @Column({
+    type: 'enum',
+    enum: ['admin', 'superAdmin'],
+  })
+  userType: 'admin' | 'superAdmin';
+
+  @Column()
+  phoneNumber: string;
 
   @Column({ default: true })
   isActive: boolean;
