@@ -8,7 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
 import { User } from './user.entity';
-import { LoginDto, RegisterDto, AuthResponseDto } from './dto/auth.dto';
+import { LoginDto, RegisterDto } from './dto/auth.dto';
 
 interface UserRow {
   id: number;
