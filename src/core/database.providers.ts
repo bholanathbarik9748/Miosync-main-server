@@ -7,15 +7,14 @@ export const AppDataSource = new DataSource({
   type: 'postgres',
   url: process.env.DATABASE_URL,
   entities: [__dirname + '/../modules/**/*.entity{.ts,.js}'],
-  synchronize: true, // Set to false in production
-  // Fallback to individual vars if DATABASE_URL is not set
+  synchronize: true,
   ...(process.env.DATABASE_URL
     ? {}
     : {
-        host: process.env.PGHOST,
-        port: parseInt(process.env.PGPORT || '5432', 10),
-        username: process.env.PGUSER,
-        password: process.env.PGPASSWORD,
-        database: process.env.PGDATABASE,
+        host: process.env.DB_HOST,
+        port: parseInt(process.env.DB_PORT || '18881', 10),
+        username: process.env.DB_USERNAME,
+        password: process.env.DB_PASSWORD,
+        database: process.env.DB_DATABASE,
       }),
 });
