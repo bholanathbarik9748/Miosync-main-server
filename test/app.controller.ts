@@ -1,6 +1,6 @@
 // This file was moved to src/modules/app/app.controller.ts
 import { Controller, Get } from '@nestjs/common';
-import { AppService } from '../src/app.service';
+import { AppService } from './app.service';
 
 @Controller()
 export class AppController {
