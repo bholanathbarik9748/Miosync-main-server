@@ -10,10 +10,10 @@ async function App() {
   const app = await NestFactory.create(AppModule, {
     logger: WinstonModule.createLogger(loggerConfig),
   });
-  
+
   // Set global prefix for API
   app.setGlobalPrefix('api');
-  
+
   // Enable API versioning
   app.enableVersioning({
     type: VersioningType.URI,
@@ -22,10 +22,13 @@ async function App() {
 
   // Apply global response interceptor
   app.useGlobalInterceptors(new ResponseInterceptor());
-  
+
   // Apply global exception filter
   app.useGlobalFilters(new GlobalExceptionFilter());
-  
+
+  // ✅ Enable CORS for all origins
+  app.enableCors();
+
   await app.listen(process.env.PORT || 3000);
 }
 
