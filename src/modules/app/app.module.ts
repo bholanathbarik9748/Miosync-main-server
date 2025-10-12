@@ -6,12 +6,14 @@ import { AppService } from './app.service';
 import { AppDataSource } from '../../core/database.providers';
 import { LoggerMiddleware } from '../../common/middleware/logger.middleware';
 import { EventParticipantsModule } from '../event-participants/event-participants.module';
+import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 
 @Module({
   imports: [
     TypeOrmModule.forRoot(AppDataSource.options),
     EventsModule,
     EventParticipantsModule,
+    WhatsAppModule,
   ],
   controllers: [AppController],
   providers: [AppService],
