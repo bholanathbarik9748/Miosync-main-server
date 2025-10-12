@@ -12,7 +12,10 @@ import {
 import { AuthService } from './auth.service';
 import { LoginDto, RegisterDto, AuthResponseDto } from './dto/auth.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
-import { ApiResponse, ResponseStatus } from '../../common/interfaces/api-response.interface';
+import {
+  ApiResponse,
+  ResponseStatus,
+} from '../../common/interfaces/api-response.interface';
 
 @Controller('auth')
 export class AuthController {

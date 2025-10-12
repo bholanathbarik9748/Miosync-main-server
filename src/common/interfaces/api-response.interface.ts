@@ -13,7 +13,9 @@ export interface ApiResponse<T = any> {
   data?: T;
   error?: {
     code: string;
+    context?: string;
     details?: any;
+    category?: string;
     stack?: string;
   };
   timestamp: string;
@@ -33,7 +35,9 @@ export type PaginatedResponse<T> = ApiResponse<PaginationData<T>>;
 export interface ErrorResponse extends ApiResponse {
   error: {
     code: string;
+    context?: string;
     details?: any;
+    category?: string;
     stack?: string;
   };
   data?: never;

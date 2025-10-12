@@ -5,6 +5,7 @@ import {
   IsNotEmpty,
   IsIn,
 } from 'class-validator';
+import { UserType } from '../../../utils/enums';
 
 export class LoginDto {
   @IsEmail()
@@ -33,8 +34,8 @@ export class RegisterDto {
 
   @IsString()
   @IsNotEmpty()
-  @IsIn(['admin', 'superAdmin'])
-  userType: 'admin' | 'superAdmin';
+  @IsIn(Object.values(UserType))
+  userType: UserType;
 
   @IsString()
   @IsNotEmpty()

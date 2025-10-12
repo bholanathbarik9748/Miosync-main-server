@@ -1,5 +1,5 @@
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from '../test/app.module';
+import { AppModule } from './modules/app/app.module';
 import { VersioningType } from '@nestjs/common';
 import { WinstonModule } from 'nest-winston';
 import { loggerConfig } from './config/logger.config';

@@ -5,6 +5,7 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { UserType } from '../../utils/enums';
 
 @Entity('users')
 export class User {
@@ -25,9 +26,9 @@ export class User {
 
   @Column({
     type: 'enum',
-    enum: ['admin', 'superAdmin'],
+    enum: UserType,
   })
-  userType: 'admin' | 'superAdmin';
+  userType: UserType;
 
   @Column()
   phoneNumber: string;
