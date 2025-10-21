@@ -23,7 +23,7 @@ export class EventsController {
   constructor(private readonly eventsService: EventsService) {}
 
   @Get()
-  @Roles(UserType.LOGISTICS)
+  @Roles(UserType.LOGISTICS, UserType.SUPER_ADMIN)
   getEvents(): Promise<any> {
     return this.eventsService.getEvents();
   }
