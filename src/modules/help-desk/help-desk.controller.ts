@@ -4,6 +4,8 @@ import {
   CreateSupportTicketDto,
   UpdateTicketStatusDto,
 } from './dto/help-desk.dto';
+import { UserType } from 'src/utils/enums';
+import { Roles } from 'src/common/decorators/roles.decorator';
 
 @Controller('help-desk')
 export class HelpDeskController {
@@ -18,16 +20,19 @@ export class HelpDeskController {
   }
 
   @Get()
+  @Roles(UserType.SUPER_ADMIN)
   async getTickets(): Promise<any> {
     return await this.helpDeskService.getTickets();
   }
 
   @Get('/:eventId')
+  @Roles(UserType.SUPER_ADMIN)
   async getTicketsByEvent(@Param('eventId') eventId: string): Promise<any> {
     return await this.helpDeskService.getTicketsByEvent(eventId);
   }
 
   @Get('/:eventId/:id')
+  @Roles(UserType.SUPER_ADMIN)
   async getTicketsDetails(
     @Param('eventId') eventId: string,
     @Param('id') id: string,
@@ -36,6 +41,7 @@ export class HelpDeskController {
   }
 
   @Patch('/:eventId/:id')
+  @Roles(UserType.SUPER_ADMIN)
   async changeTicketStatus(
     @Param('eventId') eventId: string,
     @Param('id') id: string,

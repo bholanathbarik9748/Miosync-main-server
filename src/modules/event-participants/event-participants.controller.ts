@@ -20,6 +20,8 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import * as XLSX from 'xlsx';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { UserType } from 'src/utils/enums';
+import { Roles } from 'src/common/decorators/roles.decorator';
 
 @Controller('event-participants')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -27,17 +29,20 @@ export class EventParticipantsController {
   constructor(private readonly participantsService: EventParticipantsService) {}
 
   @Get()
+  @Roles(UserType.SUPER_ADMIN)
   findAll() {
     return this.participantsService.findAll();
   }
 
   @Get(':id')
+  @Roles(UserType.SUPER_ADMIN)
   findOne(@Param('id') id: string) {
     return this.participantsService.findOne(id);
   }
 
   @Post(':id')
   @Version('2')
+  @Roles(UserType.SUPER_ADMIN)
   @UseInterceptors(FileInterceptor('file'))
   async create(
     @UploadedFile() file: Express.Multer.File,
@@ -59,6 +64,7 @@ export class EventParticipantsController {
   }
 
   @Put(':eventId/:id')
+  @Roles(UserType.SUPER_ADMIN)
   update(
     @Param('id') id: string,
     @Param('eventId') eventId: string,

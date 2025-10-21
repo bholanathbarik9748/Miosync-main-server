@@ -26,7 +26,7 @@ export class AuthController {
   async register(
     @Body(ValidationPipe) registerDto: RegisterDto,
   ): Promise<ApiResponse<AuthResponseDto>> {
-    const data = await this.authService.register(registerDto);
+    const data: unknown = await this.authService.register(registerDto);
     return {
       status: ResponseStatus.SUCCESS,
       statusCode: HttpStatus.CREATED,
@@ -41,7 +41,7 @@ export class AuthController {
   async login(
     @Body(ValidationPipe) loginDto: LoginDto,
   ): Promise<ApiResponse<AuthResponseDto>> {
-    const data = await this.authService.login(loginDto);
+    const data: unknown = await this.authService.login(loginDto);
     return {
       status: ResponseStatus.SUCCESS,
       statusCode: HttpStatus.OK,
@@ -55,7 +55,7 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Get('profile')
   async getProfile(@Request() req): Promise<ApiResponse<any>> {
-    const data = await this.authService.getProfile(req.user.userId);
+    const data: unknown = await this.authService.getProfile(req.user.userId);
     return {
       status: ResponseStatus.SUCCESS,
       statusCode: HttpStatus.OK,
