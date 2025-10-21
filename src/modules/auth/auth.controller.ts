@@ -25,7 +25,7 @@ export class AuthController {
   @Post('register')
   async register(
     @Body(ValidationPipe) registerDto: RegisterDto,
-  ): Promise<ApiResponse<AuthResponseDto>> {
+  ): Promise<ApiResponse<any>> {
     const data: unknown = await this.authService.register(registerDto);
     return {
       status: ResponseStatus.SUCCESS,
@@ -40,7 +40,7 @@ export class AuthController {
   @Post('login')
   async login(
     @Body(ValidationPipe) loginDto: LoginDto,
-  ): Promise<ApiResponse<AuthResponseDto>> {
+  ): Promise<ApiResponse<any>> {
     const data: unknown = await this.authService.login(loginDto);
     return {
       status: ResponseStatus.SUCCESS,
