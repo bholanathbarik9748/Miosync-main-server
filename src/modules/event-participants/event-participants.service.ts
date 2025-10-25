@@ -61,7 +61,7 @@ export class EventParticipantsService {
      "modeOfArrival", "trainFlightNumber", "time", "hotelName", "roomType",
      "checkIn", "checkOut", "departureDetails", "departureTime",
      attending, remarks, "remarksRound2")
-    VALUES ${values}
+    VALUES ${values} RETURNING *
   `;
 
     // Flatten parameters
