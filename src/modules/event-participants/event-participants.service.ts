@@ -61,7 +61,7 @@ export class EventParticipantsService {
      "modeOfArrival", "trainFlightNumber", "time", "hotelName", "roomType",
      "checkIn", "checkOut", "departureDetails", "departureTime",
      attending, remarks, "remarksRound2")
-    VALUES ${values} RETURNING *
+    VALUES ${values}
   `;
 
     // Flatten parameters
@@ -86,11 +86,7 @@ export class EventParticipantsService {
       p.remarksRound2,
     ]);
 
-    const response: unknown = await this.participantRepository.query(
-      query,
-      parameters,
-    );
-    return response;
+    return await this.participantRepository.query(query, parameters);
   }
 
   async update(
