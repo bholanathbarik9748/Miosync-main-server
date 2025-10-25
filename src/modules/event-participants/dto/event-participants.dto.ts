@@ -14,6 +14,7 @@ export class CreateEventParticipantDto {
   @IsString()
   phoneNumber: string;
 
+  @IsOptional()
   @IsString()
   city: string;
 
