@@ -8,6 +8,7 @@ import { AppDataSource } from '../../core/database.providers';
 import { LoggerMiddleware } from '../../middleware/logger.middleware';
 import { EventParticipantsModule } from '../event-participants/event-participants.module';
 import { HelpDeskModule } from '../help-desk/help-desk.module';
+import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { HelpDeskModule } from '../help-desk/help-desk.module';
     EventsModule,
     EventParticipantsModule,
     HelpDeskModule,
+    WhatsAppModule,
   ],
   controllers: [AppController],
   providers: [AppService],
