@@ -9,6 +9,7 @@ import { LoggerMiddleware } from '../../middleware/logger.middleware';
 import { EventParticipantsModule } from '../event-participants/event-participants.module';
 import { HelpDeskModule } from '../help-desk/help-desk.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
+import { UploadDocumentModule } from '../upload-document/upload-document.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { WhatsAppModule } from '../whatsapp/whatsapp.module';
     EventParticipantsModule,
     HelpDeskModule,
     WhatsAppModule,
+    UploadDocumentModule,
   ],
   controllers: [AppController],
   providers: [AppService],
