@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -49,6 +49,7 @@ interface Cloudinary {
 
 @Injectable()
 export class UploadDocumentService {
+  private readonly logger = new Logger(UploadDocumentService.name);
   private cloudinary: Cloudinary | null = null;
   private cloudinaryInitialized = false;
 
@@ -146,12 +147,50 @@ export class UploadDocumentService {
       // Validate autoDeleteDate if provided
       let deleteDate: Date | null = null;
       if (autoDeleteDate) {
-        deleteDate = new Date(autoDeleteDate);
-        if (isNaN(deleteDate.getTime())) {
+        // Validate date format (DD-MM-YY)
+        const datePattern = /^(\d{2})-(\d{2})-(\d{2})$/;
+        const match = autoDeleteDate.match(datePattern);
+        if (!match) {
           throw new BadRequestException(
-            'Invalid autoDeleteDate format. Please use ISO date-time format (e.g., 2025-12-31T23:59:59Z)',
+            'Invalid autoDeleteDate format. Please use DD-MM-YY format (e.g., 31-12-25)',
           );
         }
+
+        // Parse DD-MM-YY format
+        const day = parseInt(match[1], 10);
+        const monthInput = parseInt(match[2], 10);
+        const year = parseInt(match[3], 10);
+
+        // Convert 2-digit year to 4-digit year (assuming 00-30 = 2000-2030, 31-99 = 1931-1999)
+        const fullYear = year <= 30 ? 2000 + year : 1900 + year;
+
+        // Validate day and month values
+        if (day < 1 || day > 31 || monthInput < 1 || monthInput > 12) {
+          throw new BadRequestException(
+            'Invalid autoDeleteDate. Please provide a valid date in DD-MM-YY format',
+          );
+        }
+
+        // Convert month to 0-indexed for Date constructor
+        const month = monthInput - 1;
+
+        // Create date object
+        deleteDate = new Date(fullYear, month, day);
+
+        // Verify the date is valid (handles invalid dates like 31-02-25)
+        if (
+          deleteDate.getDate() !== day ||
+          deleteDate.getMonth() !== month ||
+          deleteDate.getFullYear() !== fullYear
+        ) {
+          throw new BadRequestException(
+            'Invalid autoDeleteDate. Please provide a valid date in DD-MM-YY format',
+          );
+        }
+
+        // Set to end of day for that date
+        deleteDate.setHours(23, 59, 59, 999);
+
         // Ensure delete date is in the future
         if (deleteDate <= new Date()) {
           throw new BadRequestException('autoDeleteDate must be a future date');
@@ -184,7 +223,14 @@ export class UploadDocumentService {
           await this.cloudinary.uploader.destroy(uploadResult.public_id);
         } catch (destroyError) {
           // Log error but don't fail the request
-          console.error('Failed to delete from Cloudinary:', destroyError);
+          const errorMessage =
+            destroyError instanceof Error
+              ? destroyError.message
+              : 'Unknown error';
+          this.logger.error(
+            `Failed to delete from Cloudinary during upload rollback: ${errorMessage}`,
+            destroyError instanceof Error ? destroyError.stack : undefined,
+          );
         }
         throw new BadRequestException('Failed to save document metadata');
       }
@@ -203,50 +249,121 @@ export class UploadDocumentService {
     }
 
     if (!this.cloudinary) {
-      console.error('Cloudinary is not properly configured for auto-deletion');
+      this.logger.error(
+        'Cloudinary is not properly configured for auto-deletion',
+      );
       return;
     }
 
     try {
+      const currentTime = new Date();
+      this.logger.log(
+        `Checking for expired documents. Current server time: ${currentTime.toISOString()}`,
+      );
+
+      // Debug: Check all documents with autoDeleteDate
+      const allDocsWithDate: any[] = await this.uploadDocumentRepository.query(
+        `SELECT id, "autoDeleteDate", "isActive", NOW() as "currentTime",
+                  EXTRACT(EPOCH FROM ("autoDeleteDate" - NOW())) as "secondsUntilExpiry"
+           FROM "upload_documents" 
+           WHERE "autoDeleteDate" IS NOT NULL`,
+      );
+
+      this.logger.log(
+        `Found ${allDocsWithDate.length} document(s) with autoDeleteDate set`,
+      );
+
+      if (allDocsWithDate.length > 0) {
+        for (const doc of allDocsWithDate) {
+          const secondsUntilExpiry = parseFloat(doc.secondsUntilExpiry || 0);
+          const isExpired = secondsUntilExpiry <= 0;
+          this.logger.log(
+            `Document ID: ${doc.id}, autoDeleteDate: ${doc.autoDeleteDate}, isActive: ${doc.isActive}, ` +
+              `Current DB Time: ${doc.currentTime}, Seconds until expiry: ${secondsUntilExpiry}, Is Expired: ${isExpired}`,
+          );
+        }
+      }
+
       // Find all documents that should be deleted (autoDeleteDate <= now and isActive = true)
+      // Using explicit timezone-aware comparison
       const expiredDocuments: UploadDocumentInterface[] =
         await this.uploadDocumentRepository.query(
           `SELECT * FROM "upload_documents" 
            WHERE "autoDeleteDate" IS NOT NULL 
-           AND "autoDeleteDate" <= NOW() 
+           AND "autoDeleteDate" <= CURRENT_TIMESTAMP
            AND "isActive" = true`,
         );
 
+      this.logger.log(
+        `Query found ${expiredDocuments.length} expired document(s) to delete`,
+      );
+
       if (expiredDocuments.length === 0) {
+        this.logger.log('No expired documents found to delete');
         return;
       }
-
-      console.log(
-        `Found ${expiredDocuments.length} expired document(s) to delete`,
-      );
 
       // Delete each expired document from Cloudinary and update database
       for (const document of expiredDocuments) {
         try {
-          // Delete from Cloudinary
-          await this.cloudinary.uploader.destroy(document.cloudinaryPublicId);
+          this.logger.log(
+            `Processing deletion for document ID: ${document.id}, File: ${document.originalFileName}, PublicId: ${document.cloudinaryPublicId}`,
+          );
 
-          // Update database (soft delete)
-          await this.uploadDocumentRepository.query(
+          // Delete from Cloudinary first
+          this.logger.log(
+            `Calling Cloudinary destroy API for publicId: ${document.cloudinaryPublicId}`,
+          );
+          const destroyResult = await this.cloudinary.uploader.destroy(
+            document.cloudinaryPublicId,
+          );
+
+          this.logger.log(
+            `Cloudinary destroy API completed. Result: ${JSON.stringify(destroyResult)}`,
+          );
+
+          // Verify Cloudinary deletion was successful
+          if (
+            destroyResult.result === 'ok' ||
+            destroyResult.result === 'not found'
+          ) {
+            this.logger.log(
+              `Cloudinary deletion confirmed. Result: ${destroyResult.result}`,
+            );
+          } else {
+            this.logger.warn(
+              `Cloudinary deletion returned unexpected result: ${JSON.stringify(destroyResult)}`,
+            );
+          }
+
+          // Update database (soft delete) - use parameterized query
+          const updateResult = await this.uploadDocumentRepository.query(
             `UPDATE "upload_documents" 
-             SET "isActive" = false, "updatedAt" = NOW() 
-             WHERE "id" = $1`,
+             SET "isActive" = false, "updatedAt" = CURRENT_TIMESTAMP 
+             WHERE "id" = $1 
+             RETURNING id, "isActive"`,
             [document.id],
           );
 
-          console.log(
-            `Successfully deleted document ${document.id} from Cloudinary`,
+          if (updateResult.length > 0) {
+            this.logger.log(
+              `Database updated successfully. Document ${document.id} marked as inactive. Update result: ${JSON.stringify(updateResult[0])}`,
+            );
+          } else {
+            this.logger.error(
+              `Failed to update database - no rows affected for document ${document.id}`,
+            );
+          }
+
+          this.logger.log(
+            `✓ Successfully deleted document ${document.id} (${document.originalFileName}) from Cloudinary and database`,
           );
         } catch (error) {
           const errorMessage =
             error instanceof Error ? error.message : 'Unknown error';
-          console.error(
+          this.logger.error(
             `Failed to delete document ${document.id} from Cloudinary: ${errorMessage}`,
+            error instanceof Error ? error.stack : undefined,
           );
 
           // Still mark as inactive even if Cloudinary deletion fails
@@ -257,8 +374,11 @@ export class UploadDocumentService {
                WHERE "id" = $1`,
               [document.id],
             );
+            this.logger.log(
+              `Marked document ${document.id} as inactive despite Cloudinary deletion failure`,
+            );
           } catch (dbError) {
-            console.error(
+            this.logger.error(
               `Failed to update database for document ${document.id}: ${dbError}`,
             );
           }
@@ -267,7 +387,10 @@ export class UploadDocumentService {
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';
-      console.error(`Error in deleteExpiredDocuments: ${errorMessage}`);
+      this.logger.error(
+        `Error in deleteExpiredDocuments: ${errorMessage}`,
+        error instanceof Error ? error.stack : undefined,
+      );
     }
   }
 }

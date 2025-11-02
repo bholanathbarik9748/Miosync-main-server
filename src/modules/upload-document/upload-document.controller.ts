@@ -3,7 +3,6 @@ import {
   Controller,
   Post,
   ValidationPipe,
-  UseGuards,
   UseInterceptors,
   UploadedFile,
   BadRequestException,

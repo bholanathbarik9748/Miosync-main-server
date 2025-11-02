@@ -1,14 +1,13 @@
-import { IsOptional, IsDateString, ValidateIf } from 'class-validator';
+import { IsOptional, Matches, ValidateIf } from 'class-validator';
 
 export class UploadDocumentDto {
-  @IsDateString(
-    {},
-    { message: 'autoDeleteDate must be a valid ISO date-time string' },
-  )
+  @Matches(/^\d{2}-\d{2}-\d{2}$/, {
+    message: 'autoDeleteDate must be in DD-MM-YY format (e.g., 31-12-25)',
+  })
   @IsOptional()
   @ValidateIf(
     (o: UploadDocumentDto) =>
       o.autoDeleteDate !== null && o.autoDeleteDate !== undefined,
   )
-  autoDeleteDate?: string; // Example: "2025-12-31T23:59:59Z"
+  autoDeleteDate?: string; // Example: "31-12-25"
 }
