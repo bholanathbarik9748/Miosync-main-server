@@ -1,7 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import axios, { AxiosError } from 'axios';
 import { ExternalServiceException } from 'src/common/exceptions/custom.exception';
 import { ErrorCode } from 'src/common/exceptions/error-codes.enum';
+import { EventParticipant } from '../event-participants/event-participants.entity';
 
 export interface WhatsAppMessageResponse {
   messaging_product: string;
@@ -118,6 +121,11 @@ export class WhatsAppService {
   private phoneId = process.env.WA_PHONE_NUMBER_ID;
   private base = process.env.WA_API_BASE || 'https://graph.facebook.com';
   private version = process.env.WA_API_VERSION || 'v22.0';
+
+  constructor(
+    @InjectRepository(EventParticipant)
+    private readonly participantRepository: Repository<EventParticipant>,
+  ) {}
 
   private getUrl() {
     return `${this.base}/${this.version}/${this.phoneId}`;
@@ -291,6 +299,18 @@ export class WhatsAppService {
                     responseType: 'button_reply',
                   });
 
+                  // Handle button response and update attending status
+                  this.handleButtonResponse(
+                    phoneNumber,
+                    buttonResponse.title,
+                    buttonResponse.id,
+                  ).catch((error) => {
+                    this.logger.error(
+                      `Failed to handle button response: ${error.message}`,
+                      error.stack,
+                    );
+                  });
+
                   // Log detailed response
                   this.logger.log(
                     `User ${phoneNumber} clicked button "${buttonResponse.title}" (ID: ${buttonResponse.id})`,
@@ -348,5 +368,95 @@ export class WhatsAppService {
       text,
     });
     // Add your business logic here
+  }
+
+  /**
+   * Handle button response from WhatsApp webhook
+   * Updates the attending column in the database based on yes/no response
+   */
+  async handleButtonResponse(
+    phoneNumber: string,
+    buttonTitle: string,
+    buttonId: string,
+  ): Promise<void> {
+    try {
+      // Normalize phone number for comparison (remove any formatting)
+      const normalizedPhone = phoneNumber.replace(/[^\d+]/g, '');
+
+      // Determine attending status from button response
+      // Assuming buttons are "Yes" and "No" (case-insensitive)
+      const attendingStatus =
+        buttonTitle.toLowerCase().includes('yes') ||
+        buttonTitle.toLowerCase() === 'yes' ||
+        buttonId.toLowerCase().includes('yes')
+          ? 'yes'
+          : buttonTitle.toLowerCase().includes('no') ||
+              buttonTitle.toLowerCase() === 'no' ||
+              buttonId.toLowerCase().includes('no')
+            ? 'no'
+            : null;
+
+      if (!attendingStatus) {
+        this.logger.warn(
+          `Could not determine attending status from button: ${buttonTitle} (ID: ${buttonId})`,
+        );
+        return;
+      }
+
+      // Find participant by phone number
+      // First try exact match, then try with country code variations
+      let participant = await this.participantRepository.query(
+        `SELECT * FROM "event_participants" 
+         WHERE REPLACE(REPLACE("phoneNumber", ' ', ''), '-', '') = $1 
+         OR "phoneNumber" = $1
+         ORDER BY "createdAt" DESC 
+         LIMIT 1`,
+        [normalizedPhone],
+      );
+
+      // If not found, try with different phone number formats
+      if (!participant || participant.length === 0) {
+        // Try with + prefix
+        const phoneWithPlus = normalizedPhone.startsWith('+')
+          ? normalizedPhone
+          : `+${normalizedPhone}`;
+        participant = await this.participantRepository.query(
+          `SELECT * FROM "event_participants" 
+           WHERE REPLACE(REPLACE("phoneNumber", ' ', ''), '-', '') = $1 
+           OR "phoneNumber" = $1
+           ORDER BY "createdAt" DESC 
+           LIMIT 1`,
+          [phoneWithPlus],
+        );
+      }
+
+      if (!participant || participant.length === 0) {
+        this.logger.warn(
+          `Participant not found for phone number: ${phoneNumber} (normalized: ${normalizedPhone})`,
+        );
+        return;
+      }
+
+      const participantData = participant[0];
+
+      // Update attending status in database
+      await this.participantRepository.query(
+        `UPDATE "event_participants" 
+         SET attending = $1 
+         WHERE id = $2 AND "eventId" = $3 
+         RETURNING *`,
+        [attendingStatus, participantData.id, participantData.eventId],
+      );
+
+      this.logger.log(
+        `Updated attending status for participant ${participantData.id} (${participantData.name}) to "${attendingStatus}"`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error handling button response: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw error;
+    }
   }
 }

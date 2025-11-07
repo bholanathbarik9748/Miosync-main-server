@@ -117,20 +117,54 @@ export class WhatsAppController {
           this.logger.log(`📌 Change detected: ${change.field}`);
 
           const messages = change.value?.messages;
-          console.log(messages);
           if (Array.isArray(messages)) {
             for (const msg of messages) {
-              const text = msg.text?.body;
-              const from = msg.from;
+              // Check for interactive messages (button clicks) first
+              if (msg.interactive) {
+                const interactive = msg.interactive;
+                const phoneNumber = msg.from;
 
-              this.logger.log('📩 Incoming Message', {
-                from,
-                type: msg.type,
-                text: text ?? '(Not text message)',
-              });
+                if (
+                  interactive.type === 'button_reply' &&
+                  interactive.button_reply
+                ) {
+                  const buttonResponse = interactive.button_reply;
 
-              if (text && from) {
-                this.whatsappService.handleIncomingTextMessage(from, text);
+                  this.logger.log('📱 WhatsApp Button Response Received', {
+                    phoneNumber,
+                    messageId: msg.id,
+                    buttonId: buttonResponse.id,
+                    buttonTitle: buttonResponse.title,
+                  });
+
+                  // Handle button response (this will update the DB)
+                  void this.whatsappService
+                    .handleButtonResponse(
+                      phoneNumber,
+                      buttonResponse.title,
+                      buttonResponse.id,
+                    )
+                    .catch((error: unknown) => {
+                      this.logger.error(
+                        `Failed to process button response: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                        error instanceof Error ? error.stack : undefined,
+                      );
+                    });
+                }
+              } else {
+                // Handle text messages
+                const text = msg.text?.body;
+                const from = msg.from;
+
+                this.logger.log('📩 Incoming Message', {
+                  from,
+                  type: msg.type,
+                  text: text ?? '(Not text message)',
+                });
+
+                if (text && from) {
+                  this.whatsappService.handleIncomingTextMessage(from, text);
+                }
               }
             }
           }

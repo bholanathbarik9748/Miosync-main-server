@@ -1,41 +1,58 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { EventParticipant } from './event-participants.entity';
 import { UpdateEventParticipantDto } from './dto/event-participants.dto';
 import { mapExcelRow } from './utils/mapExcelRow';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { Event } from '../events/events.entity';
+
+export interface EventParticipantRow extends EventParticipant {
+  id: string;
+}
+
+interface EventRow extends Event {
+  id: string;
+}
 
 @Injectable()
 export class EventParticipantsService {
+  private readonly logger = new Logger(EventParticipantsService.name);
+
   constructor(
     @InjectRepository(EventParticipant)
     private readonly participantRepository: Repository<EventParticipant>,
+    @InjectRepository(Event)
+    private readonly eventRepository: Repository<Event>,
+    private readonly whatsappService: WhatsAppService,
   ) {}
 
-  async findAll(): Promise<any> {
-    const participant: any[] = await this.participantRepository.query(
-      'SELECT * FROM "event_participants"',
-    );
+  async findAll(): Promise<EventParticipantRow[]> {
+    const participant = await this.participantRepository.query<
+      EventParticipantRow[]
+    >('SELECT * FROM "event_participants"');
 
-    if (!participant) {
+    if (!participant || participant.length === 0) {
       throw new NotFoundException('Participant not found');
     }
     return participant;
   }
 
-  async findOne(id: string): Promise<any> {
-    const participant: any[] = await this.participantRepository.query(
-      'SELECT * FROM "event_participants" WHERE "eventId" = $1',
-      [id],
-    );
+  async findOne(id: string): Promise<EventParticipantRow[]> {
+    const participant = await this.participantRepository.query<
+      EventParticipantRow[]
+    >('SELECT * FROM "event_participants" WHERE "eventId" = $1', [id]);
 
-    if (!participant) {
+    if (!participant || participant.length === 0) {
       throw new NotFoundException('Participant not found');
     }
     return participant;
   }
 
-  async create(data: any[], eventId: string): Promise<any> {
+  async create(
+    data: unknown[],
+    eventId: string,
+  ): Promise<EventParticipantRow[]> {
     if (!Array.isArray(data)) {
       data = [data];
     }
@@ -65,44 +82,149 @@ export class EventParticipantsService {
   `;
 
     // Flatten parameters
-    const parameters: any[] = participants.flatMap((p) => [
-      p.eventId,
-      p.name,
-      p.category,
-      p.phoneNumber,
-      p.city,
-      p.dateOfArrival,
-      p.modeOfArrival,
-      p.trainFlightNumber,
-      p.time,
-      p.hotelName,
-      p.roomType,
-      p.checkIn,
-      p.checkOut,
-      p.departureDetails,
-      p.departureTime,
-      p.attending,
-      p.remarks,
-      p.remarksRound2,
-    ]);
+    const parameters: (string | Date | null)[] = participants.flatMap((p) => {
+      return [
+        p.eventId,
+        p.name,
+        p.category,
+        p.phoneNumber,
+        p.city,
+        p.dateOfArrival,
+        p.modeOfArrival,
+        p.trainFlightNumber,
+        p.time,
+        p.hotelName,
+        p.roomType,
+        p.checkIn,
+        p.checkOut,
+        p.departureDetails,
+        p.departureTime,
+        p.attending,
+        p.remarks,
+        p.remarksRound2,
+      ] as (string | Date | null)[];
+    });
 
-    return await this.participantRepository.query(query, parameters);
+    // First, insert into DB (ensuring consistency)
+    const insertedParticipants = await this.participantRepository.query<
+      EventParticipantRow[]
+    >(query, parameters);
+
+    // Then, send WhatsApp reminders for each participant
+    // Process in background to not block the response
+    this.sendReminderMessages(insertedParticipants, eventId).catch(
+      (error: unknown) => {
+        const errorMessage =
+          error instanceof Error ? error.message : 'Unknown error';
+        const errorStack = error instanceof Error ? error.stack : undefined;
+        this.logger.error(
+          `Failed to send reminder messages: ${errorMessage}`,
+          errorStack,
+        );
+      },
+    );
+
+    return insertedParticipants;
+  }
+
+  private async sendReminderMessages(
+    participants: EventParticipantRow[],
+    eventId: string,
+  ): Promise<void> {
+    this.logger.log(
+      `Sending reminder_event WhatsApp messages to ${participants.length} participants`,
+    );
+
+    const eventDetails = await this.eventRepository.query<EventRow[]>(
+      'SELECT * FROM "events" WHERE id = $1',
+      [eventId],
+    );
+
+    if (!eventDetails || eventDetails.length === 0) {
+      this.logger.warn(`Event not found for eventId: ${eventId}`);
+      return;
+    }
+
+    const event = eventDetails[0];
+
+    for (const participant of participants) {
+      if (!participant.phoneNumber) {
+        this.logger.warn(
+          `Skipping participant ${participant.id} - no phone number`,
+        );
+        continue;
+      }
+
+      try {
+        // Format phone number (remove any non-digit characters except +)
+        const phoneNumber = String(participant.phoneNumber).replace(
+          /[^\d+]/g,
+          '',
+        );
+
+        // Send reminder_event template
+        // Note: Buttons should be pre-configured in the WhatsApp Business template
+        // The template should have interactive buttons (Yes/No) that will be handled via webhook
+        const payload = {
+          messaging_product: 'whatsapp',
+          to: phoneNumber,
+          type: 'template',
+          template: {
+            name: 'guest_invite_id_request',
+            language: { code: 'en' },
+            components: [
+              {
+                type: 'header',
+                parameters: [{ type: 'text', text: String(participant.name) }],
+              },
+              {
+                type: 'body',
+                parameters: [{ type: 'text', text: String(event.eventName) }],
+              },
+              {
+                type: 'button',
+                sub_type: 'url',
+                index: '0', // button index starts at 0
+                parameters: [
+                  {
+                    type: 'text',
+                    text: String(event.id), // this replaces {{3}} in your URL
+                  },
+                ],
+              },
+            ],
+          },
+        };
+
+        await this.whatsappService.sendTemplate(payload);
+        this.logger.log(
+          `Sent reminder_event to ${phoneNumber} for participant ${participant.id}`,
+        );
+      } catch (error: unknown) {
+        const errorMessage =
+          error instanceof Error ? error.message : 'Unknown error';
+        this.logger.error(
+          `Failed to send reminder to ${participant.phoneNumber}: ${errorMessage}`,
+        );
+        // Continue with other participants even if one fails
+      }
+    }
   }
 
   async update(
     id: string,
     eventId: string,
     data: Partial<UpdateEventParticipantDto>,
-  ): Promise<any> {
+  ): Promise<EventParticipantRow[]> {
     const setClauses: string[] = [];
-    const values: any[] = [];
+    const values: (string | Date | null)[] = [];
     let index = 1;
 
     // Dynamically add only fields that are not undefined or null
     for (const [key, value] of Object.entries(data)) {
       if (value !== undefined && value !== null) {
         setClauses.push(`"${key}" = $${index}`);
-        values.push(value);
+        values.push(value as string | Date | null);
         index++;
       }
     }
@@ -123,6 +245,9 @@ export class EventParticipantsService {
     RETURNING *;
   `;
 
-    return await this.participantRepository.query(query, values);
+    return await this.participantRepository.query<EventParticipantRow[]>(
+      query,
+      values,
+    );
   }
 }
