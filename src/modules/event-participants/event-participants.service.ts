@@ -294,7 +294,7 @@ export class EventParticipantsService {
       );
     }
 
-    // Get event data to calculate autoDeleteDate
+    // Get event data
     const eventData = (await this.eventsService.getEventData(
       eventId,
     )) as EventRow[];
@@ -304,26 +304,13 @@ export class EventParticipantsService {
 
     const event = eventData[0];
 
-    // Calculate autoDeleteDate: 1 year from now, or event delete date if it exists
-    // Since there's no event delete date field, we'll use 1 year from now
-    const oneYearFromNow = new Date();
-    oneYearFromNow.setFullYear(oneYearFromNow.getFullYear() + 1);
-
-    // Format as DD-MM-YY for the upload service
-    const day = String(oneYearFromNow.getDate()).padStart(2, '0');
-    const month = String(oneYearFromNow.getMonth() + 1).padStart(2, '0');
-    const year = String(oneYearFromNow.getFullYear() % 100).padStart(2, '0');
-    const autoDeleteDateStr = `${day}-${month}-${year}`;
-
     // Upload both documents
     const frontDocument = await this.uploadDocumentService.uploadFile(
       frontFile,
-      autoDeleteDateStr,
     );
 
     const backDocument = await this.uploadDocumentService.uploadFile(
       backFile,
-      autoDeleteDateStr,
     );
 
     // Update participant record with document URLs

@@ -38,9 +38,6 @@ export class UploadDocument {
   @Column({ name: 'isActive', type: 'boolean', default: true })
   isActive: boolean;
 
-  @Column({ name: 'autoDeleteDate', type: 'timestamptz', nullable: true })
-  autoDeleteDate: Date | null;
-
   @CreateDateColumn({ name: 'createdAt', type: 'timestamptz' })
   createdAt: Date;
 
