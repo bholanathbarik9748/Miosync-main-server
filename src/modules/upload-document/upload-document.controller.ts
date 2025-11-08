@@ -29,6 +29,9 @@ export class UploadDocumentController {
       throw new BadRequestException('File is required');
     }
 
-    return await this.uploadDocumentService.uploadFile(file);
+    return await this.uploadDocumentService.uploadFile(
+      file,
+      body.autoDeleteDate,
+    );
   }
 }
