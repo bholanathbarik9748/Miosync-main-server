@@ -23,7 +23,12 @@ export class WhatsAppMessageToken {
   @Column({ name: 'phoneNumber', type: 'varchar', length: 20 })
   phoneNumber: string;
 
-  @Column({ name: 'templateName', type: 'varchar', length: 100, nullable: true })
+  @Column({
+    name: 'templateName',
+    type: 'varchar',
+    length: 100,
+    nullable: true,
+  })
   templateName: string | null;
 
   @Column({ name: 'isProcessed', type: 'boolean', default: false })
@@ -35,4 +40,3 @@ export class WhatsAppMessageToken {
   @UpdateDateColumn({ name: 'updatedAt', type: 'timestamptz' })
   updatedAt: Date;
 }
-

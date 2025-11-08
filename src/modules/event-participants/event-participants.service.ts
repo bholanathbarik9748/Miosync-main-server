@@ -50,7 +50,7 @@ export class EventParticipantsService {
   async findOne(id: string): Promise<EventParticipantRow[]> {
     const participant = await this.participantRepository.query<
       EventParticipantRow[]
-    >('SELECT * FROM "event_participants" WHERE "eventId" = $1', [id]);
+    >('SELECT * FROM "event_participants" WHERE "id" = $1', [id]);
 
     if (!participant || participant.length === 0) {
       throw new NotFoundException('Participant not found');
