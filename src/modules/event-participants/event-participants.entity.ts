@@ -58,4 +58,10 @@ export class EventParticipant {
 
   @Column({ type: 'text', nullable: true })
   remarksRound2: string | null;
+
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  frontDocumentUrl: string | null;
+
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  backDocumentUrl: string | null;
 }

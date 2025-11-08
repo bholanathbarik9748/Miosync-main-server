@@ -9,32 +9,36 @@ import {
   UseGuards,
   Version,
   UploadedFile,
+  UploadedFiles,
   UseInterceptors,
+  BadRequestException,
 } from '@nestjs/common';
 import { EventParticipantsService } from './event-participants.service';
-import {
-  CreateEventParticipantDto,
-  UpdateEventParticipantDto,
-} from './dto/event-participants.dto';
+import { UpdateEventParticipantDto } from './dto/event-participants.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import * as XLSX from 'xlsx';
-import { FileInterceptor } from '@nestjs/platform-express';
+import {
+  FileInterceptor,
+  FileFieldsInterceptor,
+} from '@nestjs/platform-express';
 import { UserType } from 'src/utils/enums';
 import { Roles } from 'src/common/decorators/roles.decorator';
+import { multerConfig } from '../upload-document/config/multer.config';
 
 @Controller('event-participants')
-@UseGuards(JwtAuthGuard, RolesGuard)
 export class EventParticipantsController {
   constructor(private readonly participantsService: EventParticipantsService) {}
 
   @Get()
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserType.SUPER_ADMIN)
   findAll() {
     return this.participantsService.findAll();
   }
 
   @Get(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserType.SUPER_ADMIN)
   findOne(@Param('id') id: string) {
     return this.participantsService.findOne(id);
@@ -42,6 +46,7 @@ export class EventParticipantsController {
 
   @Post(':id')
   @Version('2')
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserType.SUPER_ADMIN)
   @UseInterceptors(FileInterceptor('file'))
   async create(
@@ -123,6 +128,7 @@ export class EventParticipantsController {
   }
 
   @Put(':eventId/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserType.SUPER_ADMIN)
   update(
     @Param('id') id: string,
@@ -130,5 +136,47 @@ export class EventParticipantsController {
     @Body(ValidationPipe) body: Partial<UpdateEventParticipantDto>,
   ) {
     return this.participantsService.update(id, eventId, body);
+  }
+
+  @Post('document/:eventId/:id')
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [
+        { name: 'front', maxCount: 1 },
+        { name: 'back', maxCount: 1 },
+      ],
+      multerConfig,
+    ),
+  )
+  async uploadDoc(
+    @Param('id') participantId: string,
+    @Param('eventId') eventId: string,
+    @UploadedFiles()
+    files: {
+      front?: Express.Multer.File[];
+      back?: Express.Multer.File[];
+    },
+  ): Promise<{
+    frontDocumentUrl: string;
+    backDocumentUrl: string;
+    message: string;
+  }> {
+    if (!files.front || files.front.length === 0) {
+      throw new BadRequestException('Front image is required');
+    }
+
+    if (!files.back || files.back.length === 0) {
+      throw new BadRequestException('Back image is required');
+    }
+
+    const frontImage = files.front[0];
+    const backImage = files.back[0];
+
+    return await this.participantsService.uploadDocument(
+      participantId,
+      eventId,
+      frontImage,
+      backImage,
+    );
   }
 }

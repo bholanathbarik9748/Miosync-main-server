@@ -119,8 +119,93 @@ export class WhatsAppController {
           const messages = change.value?.messages;
           if (Array.isArray(messages)) {
             for (const msg of messages) {
-              // Check for interactive messages (button clicks) first
-              if (msg.interactive) {
+              // Check for button type messages (Yes/No responses)
+              /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
+              const msgAny = msg as any;
+              if (
+                msg.type === 'button' &&
+                msgAny.button &&
+                typeof msgAny.button === 'object' &&
+                'text' in msgAny.button &&
+                typeof msgAny.button.text === 'string'
+              ) {
+                const buttonText: string = msgAny.button.text;
+                const phoneNumber = msg.from;
+                const contextMessageId =
+                  msgAny.context &&
+                  typeof msgAny.context === 'object' &&
+                  'id' in msgAny.context &&
+                  typeof msgAny.context.id === 'string'
+                    ? msgAny.context.id
+                    : null;
+                /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
+
+                // Only process if button text is "Yes" or "No"
+                if (buttonText === 'Yes' || buttonText === 'No') {
+                  this.logger.log('📱 WhatsApp Button Response Received', {
+                    phoneNumber,
+                    messageId: msg.id,
+                    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+                    contextMessageId,
+                    buttonText,
+                  });
+
+                  // Use context.id (original message ID) to find participant
+                  if (
+                    contextMessageId &&
+                    typeof contextMessageId === 'string'
+                  ) {
+                    void this.whatsappService
+                      .findParticipantByMessageId(contextMessageId)
+                      .then((tokenData) => {
+                        if (tokenData) {
+                          console.log(tokenData);
+                          if (
+                            tokenData?.templateName == 'booking_confirmation'
+                          ) {
+                            const attendingStatus =
+                              buttonText === 'Yes' ? 'yes' : 'no';
+                            this.logger.log(
+                              `Found participant ${tokenData.participantId} for message ${contextMessageId}, updating attending to ${attendingStatus}`,
+                            );
+                            void this.whatsappService
+                              .updateParticipantAttending(
+                                tokenData.participantId,
+                                tokenData.eventId,
+                                attendingStatus,
+                              )
+                              .then(() => {
+                                // Delete the token from whatsapp_message_tokens after updating
+                                return this.whatsappService.deleteMessageToken(
+                                  contextMessageId,
+                                );
+                              })
+                              .catch((error: unknown) => {
+                                this.logger.error(
+                                  `Failed to update attending status or delete token: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                                );
+                              });
+                          } else {
+                            this.logger.warn(
+                              `No participant found for context message ID: ${contextMessageId}`,
+                            );
+                          }
+                        }
+                      })
+                      .catch((error: unknown) => {
+                        this.logger.error(
+                          `Failed to find participant by message ID: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                        );
+                      });
+                  } else {
+                    this.logger.warn(
+                      `No context message ID found for button response from ${phoneNumber}`,
+                    );
+                  }
+                }
+              }
+              // Check for interactive messages (button clicks) - legacy format
+              else if (msg.interactive) {
                 const interactive = msg.interactive;
                 const phoneNumber = msg.from;
 
@@ -169,14 +254,75 @@ export class WhatsAppController {
             }
           }
 
+          // Handle statuses - only if messages object doesn't exist
+          // If messages exist, we already handled it above and deleted the token
           const statuses = change.value?.statuses;
-          if (Array.isArray(statuses)) {
+          const hasMessages =
+            change.value?.messages &&
+            Array.isArray(change.value.messages) &&
+            change.value.messages.length > 0;
+
+          if (Array.isArray(statuses) && !hasMessages) {
+            // Only store in whatsapp_message_tokens if messages don't exist
             for (const status of statuses) {
-              this.logger.log('📦 Status Update', {
-                id: status.id,
-                status: status.status,
-                timestamp: status.timestamp,
-              });
+              const messageId = status.id;
+              const recipientId = status.recipient_id;
+
+              this.logger.log(`Message ID from status: ${messageId}`);
+
+              if (messageId && recipientId) {
+                // Check if token already exists
+                void this.whatsappService
+                  .findParticipantByMessageId(messageId)
+                  .then((tokenData) => {
+                    if (!tokenData) {
+                      // Token doesn't exist, find participant by phone and store temporarily
+                      const normalizedPhone = String(recipientId).replace(
+                        /[^\d+]/g,
+                        '',
+                      );
+                      this.logger.log(
+                        `Token not found for message ${messageId}, finding participant by phone ${normalizedPhone} to store temporarily`,
+                      );
+                      // Find participant by phone number and store token
+                      this.whatsappService
+                        .findAndStoreStatusToken(messageId, normalizedPhone)
+                        .catch((error: unknown) => {
+                          this.logger.error(
+                            `Failed to store status token: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                          );
+                        });
+                    } else {
+                      // Token exists, update attending status
+                      this.logger.log(
+                        `Found participant ${tokenData.participantId} for message ${messageId}`,
+                      );
+                      this.whatsappService
+                        .updateParticipantAttending(
+                          tokenData.participantId,
+                          tokenData.eventId,
+                          'Not responded',
+                        )
+                        .catch((error: unknown) => {
+                          this.logger.error(
+                            `Failed to update attending status: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                          );
+                        });
+                    }
+                  })
+                  .catch((error: unknown) => {
+                    this.logger.error(
+                      `Failed to find participant by message ID: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                    );
+                  });
+              }
+            }
+          } else if (Array.isArray(statuses) && hasMessages) {
+            // Messages exist, so we already handled it - just log status
+            for (const status of statuses) {
+              this.logger.log(
+                `Status update (messages already processed): ${status.id} - ${status.status}`,
+              );
             }
           }
         }
