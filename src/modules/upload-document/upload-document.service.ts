@@ -99,6 +99,7 @@ export class UploadDocumentService {
 
   async uploadFile(
     file: Express.Multer.File,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     autoDeleteDate?: string,
   ): Promise<UploadDocumentInterface> {
     if (!file) {
@@ -144,59 +145,6 @@ export class UploadDocumentService {
         },
       );
 
-      // Validate autoDeleteDate if provided
-      let deleteDate: Date | null = null;
-      if (autoDeleteDate) {
-        // Validate date format (DD-MM-YY)
-        const datePattern = /^(\d{2})-(\d{2})-(\d{2})$/;
-        const match = autoDeleteDate.match(datePattern);
-        if (!match) {
-          throw new BadRequestException(
-            'Invalid autoDeleteDate format. Please use DD-MM-YY format (e.g., 31-12-25)',
-          );
-        }
-
-        // Parse DD-MM-YY format
-        const day = parseInt(match[1], 10);
-        const monthInput = parseInt(match[2], 10);
-        const year = parseInt(match[3], 10);
-
-        // Convert 2-digit year to 4-digit year (assuming 00-30 = 2000-2030, 31-99 = 1931-1999)
-        const fullYear = year <= 30 ? 2000 + year : 1900 + year;
-
-        // Validate day and month values
-        if (day < 1 || day > 31 || monthInput < 1 || monthInput > 12) {
-          throw new BadRequestException(
-            'Invalid autoDeleteDate. Please provide a valid date in DD-MM-YY format',
-          );
-        }
-
-        // Convert month to 0-indexed for Date constructor
-        const month = monthInput - 1;
-
-        // Create date object
-        deleteDate = new Date(fullYear, month, day);
-
-        // Verify the date is valid (handles invalid dates like 31-02-25)
-        if (
-          deleteDate.getDate() !== day ||
-          deleteDate.getMonth() !== month ||
-          deleteDate.getFullYear() !== fullYear
-        ) {
-          throw new BadRequestException(
-            'Invalid autoDeleteDate. Please provide a valid date in DD-MM-YY format',
-          );
-        }
-
-        // Set to end of day for that date
-        deleteDate.setHours(23, 59, 59, 999);
-
-        // Ensure delete date is in the future
-        if (deleteDate <= new Date()) {
-          throw new BadRequestException('autoDeleteDate must be a future date');
-        }
-      }
-
       // Save metadata to database
       const response: UploadDocumentInterface[] =
         await this.uploadDocumentRepository.query(
@@ -213,7 +161,7 @@ export class UploadDocumentService {
             null, // description
             null, // uploadedBy
             true,
-            deleteDate,
+            null, // autoDeleteDate
           ],
         );
 
