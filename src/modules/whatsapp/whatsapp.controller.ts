@@ -164,7 +164,7 @@ export class WhatsAppController {
                             tokenData?.templateName == 'booking_confirmation'
                           ) {
                             const attendingStatus =
-                              buttonText === 'Yes' ? 'yes' : 'no';
+                              buttonText === 'Yes' ? 'Yes' : 'No';
                             this.logger.log(
                               `Found participant ${tokenData.participantId} for message ${contextMessageId}, updating attending to ${attendingStatus}`,
                             );

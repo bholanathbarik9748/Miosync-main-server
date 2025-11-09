@@ -156,11 +156,101 @@ export class EventParticipantsService {
 
     const event = eventDetails[0];
 
-    for (const participant of participants) {
+    // Track success and failure counts
+    let successCount = 0;
+    let failureCount = 0;
+    const successfulParticipants: Array<{
+      id: string;
+      name: string;
+      phoneNumber: string;
+      messageId: string | null;
+      sentAt: string;
+    }> = [];
+    const failedParticipants: Array<{
+      id: string;
+      phoneNumber: string;
+      error: string;
+    }> = [];
+
+    // Helper function to delay execution
+    const delay = (ms: number) =>
+      new Promise((resolve) => setTimeout(resolve, ms));
+
+    // Helper function to retry with exponential backoff
+    const retryWithBackoff = async (
+      fn: () => Promise<unknown>,
+      maxRetries = 3,
+      baseDelay = 1000,
+    ): Promise<unknown> => {
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          return await fn();
+        } catch (error: unknown) {
+          const errorMessage =
+            error instanceof Error ? error.message : 'Unknown error';
+
+          // Check for rate limit errors
+          let isRateLimitError =
+            errorMessage.toLowerCase().includes('rate limit') ||
+            errorMessage.toLowerCase().includes('too many requests');
+
+          // Check if it's an ExternalServiceException with WhatsApp error code
+          if (
+            error &&
+            typeof error === 'object' &&
+            'details' in error &&
+            error.details &&
+            typeof error.details === 'object' &&
+            'whatsappErrorCode' in error.details
+          ) {
+            const whatsappErrorCode = String(
+              (error.details as { whatsappErrorCode?: string })
+                .whatsappErrorCode,
+            );
+            // WhatsApp rate limit error codes: 80007, 80008, 80009
+            isRateLimitError =
+              isRateLimitError ||
+              whatsappErrorCode.includes('80007') ||
+              whatsappErrorCode.includes('80008') ||
+              whatsappErrorCode.includes('80009');
+          }
+
+          if (attempt === maxRetries) {
+            throw error;
+          }
+
+          // If rate limited, use longer backoff
+          if (isRateLimitError) {
+            const backoffDelay = baseDelay * Math.pow(2, attempt) * 5; // 5s, 10s, 20s
+            this.logger.warn(
+              `Rate limit detected. Retrying in ${backoffDelay}ms (attempt ${attempt}/${maxRetries})`,
+            );
+            await delay(backoffDelay);
+          } else {
+            const backoffDelay = baseDelay * Math.pow(2, attempt); // 1s, 2s, 4s
+            this.logger.warn(
+              `Error sending message. Retrying in ${backoffDelay}ms (attempt ${attempt}/${maxRetries}): ${errorMessage}`,
+            );
+            await delay(backoffDelay);
+          }
+        }
+      }
+    };
+
+    // Process participants with delay between each message
+    for (let i = 0; i < participants.length; i++) {
+      const participant = participants[i];
+
       if (!participant.phoneNumber) {
         this.logger.warn(
           `Skipping participant ${participant.id} - no phone number`,
         );
+        failureCount++;
+        failedParticipants.push({
+          id: participant.id,
+          phoneNumber: 'N/A',
+          error: 'No phone number',
+        });
         continue;
       }
 
@@ -170,6 +260,20 @@ export class EventParticipantsService {
           /[^\d+]/g,
           '',
         );
+
+        // Validate phone number format
+        if (!phoneNumber || phoneNumber.length < 10) {
+          this.logger.warn(
+            `Skipping participant ${participant.id} - invalid phone number: ${phoneNumber}`,
+          );
+          failureCount++;
+          failedParticipants.push({
+            id: participant.id,
+            phoneNumber,
+            error: 'Invalid phone number format',
+          });
+          continue;
+        }
 
         // Send reminder_event template
         // Note: Buttons should be pre-configured in the WhatsApp Business template
@@ -205,18 +309,103 @@ export class EventParticipantsService {
           },
         };
 
-        await this.whatsappService.sendTemplate(payload);
+        // Retry with exponential backoff and capture response
+        const response = (await retryWithBackoff(async () => {
+          return await this.whatsappService.sendTemplate(payload);
+        })) as { messages?: Array<{ id?: string }> } | null;
+
+        // Extract message ID from response
+        const messageId =
+          response &&
+          typeof response === 'object' &&
+          'messages' in response &&
+          Array.isArray(response.messages) &&
+          response.messages.length > 0 &&
+          response.messages[0]?.id
+            ? String(response.messages[0].id)
+            : null;
+
+        successCount++;
         this.logger.log(
-          `Sent reminder_event to ${phoneNumber} for participant ${participant.id}`,
+          `✅ [${i + 1}/${participants.length}] Message SENT to ${phoneNumber} (Participant: ${participant.name}, ID: ${participant.id})${messageId ? ` | Message ID: ${messageId}` : ''}`,
         );
+
+        // Track successful participant
+        successfulParticipants.push({
+          id: participant.id,
+          name: String(participant.name || 'Unknown'),
+          phoneNumber,
+          messageId,
+          sentAt: new Date().toISOString(),
+        });
+
+        // Store message token for tracking delivery status
+        if (messageId && typeof messageId === 'string') {
+          this.whatsappService
+            .storeMessageToken(
+              messageId,
+              participant.id,
+              eventId,
+              phoneNumber,
+              'guest_invite_id_request',
+            )
+            .catch((error: unknown) => {
+              this.logger.error(
+                `Failed to store message token for participant ${participant.id}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+              );
+            });
+        }
+
+        // Add delay between messages to respect rate limits (1.5 seconds)
+        // This helps avoid hitting WhatsApp API rate limits
+        if (i < participants.length - 1) {
+          await delay(1500);
+        }
       } catch (error: unknown) {
+        failureCount++;
         const errorMessage =
           error instanceof Error ? error.message : 'Unknown error';
+        const errorStack = error instanceof Error ? error.stack : undefined;
+
         this.logger.error(
-          `Failed to send reminder to ${participant.phoneNumber}: ${errorMessage}`,
+          `[${i + 1}/${participants.length}] Failed to send reminder to ${participant.phoneNumber} (participant ${participant.id}): ${errorMessage}`,
+          errorStack,
         );
+
+        failedParticipants.push({
+          id: participant.id,
+          phoneNumber: String(participant.phoneNumber),
+          error: errorMessage,
+        });
         // Continue with other participants even if one fails
       }
+    }
+
+    // Log summary
+    this.logger.log(
+      `Completed sending reminder messages. Success: ${successCount}, Failed: ${failureCount}, Total: ${participants.length}`,
+    );
+
+    // Print JSON summary of participants who received messages
+    const summary = {
+      totalParticipants: participants.length,
+      successCount,
+      failureCount,
+      successfulParticipants,
+      failedParticipants,
+      eventId,
+      eventName: event.eventName,
+      completedAt: new Date().toISOString(),
+    };
+
+    this.logger.log('📊 MESSAGE SENDING SUMMARY (JSON):');
+    this.logger.log(JSON.stringify(summary, null, 2));
+
+    if (failedParticipants.length > 0) {
+      this.logger.warn(
+        `Failed to send messages to ${failedParticipants.length} participants:`,
+        JSON.stringify(failedParticipants, null, 2),
+      );
     }
   }
 

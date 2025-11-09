@@ -209,7 +209,7 @@ export class WhatsAppService {
     }
   }
 
-  processWebhookEvent(payload: WhatsAppWebhookPayload): void {
+  async processWebhookEvent(payload: WhatsAppWebhookPayload): Promise<void> {
     try {
       // Validate payload structure
       if (!payload || !payload.object) {
@@ -259,15 +259,73 @@ export class WhatsAppService {
             value.statuses.length > 0
           ) {
             for (const status of value.statuses) {
-              this.logger.log(`📱 WhatsApp Status Update Received`, {
+              const messageId = status.id;
+              const recipientId = status.recipient_id;
+              const messageStatus = status.status;
+
+              // Try to find participant information from message token
+              let participantInfo: {
+                participantId: string;
+                eventId: string;
+                templateName: string;
+              } | null = null;
+              try {
+                const tokenData = await this.findParticipantByMessageId(
+                  messageId,
+                );
+                if (tokenData) {
+                  participantInfo = {
+                    participantId: tokenData.participantId,
+                    eventId: tokenData.eventId,
+                    templateName: tokenData.templateName,
+                  };
+                }
+              } catch (error) {
+                // Ignore errors when looking up participant
+              }
+
+              // Log status update with participant information
+              const statusEmoji =
+                messageStatus === 'sent'
+                  ? '📤'
+                  : messageStatus === 'delivered'
+                    ? '✅'
+                    : messageStatus === 'read'
+                      ? '👁️'
+                      : messageStatus === 'failed'
+                        ? '❌'
+                        : '📱';
+
+              if (participantInfo) {
+                this.logger.log(
+                  `${statusEmoji} Message ${messageStatus.toUpperCase()} - Participant ID: ${participantInfo.participantId} | Phone: ${recipientId} | Message ID: ${messageId} | Template: ${participantInfo.templateName || 'N/A'}`,
+                );
+              } else {
+                this.logger.log(
+                  `${statusEmoji} Message ${messageStatus.toUpperCase()} - Phone: ${recipientId} | Message ID: ${messageId}`,
+                );
+              }
+
+              // Log detailed status information
+              this.logger.log(`📱 WhatsApp Status Update Details`, {
                 messageId: status.id,
                 status: status.status,
                 recipientId: status.recipient_id,
+                participantId: participantInfo?.participantId || 'Unknown',
+                eventId: participantInfo?.eventId || 'Unknown',
                 timestamp: new Date(
                   parseInt(status.timestamp) * 1000,
                 ).toISOString(),
                 errors: status.errors,
               });
+
+              // If message failed, log error details
+              if (messageStatus === 'failed' && status.errors) {
+                this.logger.error(
+                  `❌ Message FAILED to deliver - Participant ID: ${participantInfo?.participantId || 'Unknown'} | Phone: ${recipientId} | Message ID: ${messageId}`,
+                  JSON.stringify(status.errors, null, 2),
+                );
+              }
             }
           }
 
