@@ -194,6 +194,17 @@ export class EventParticipantsService {
             errorMessage.toLowerCase().includes('rate limit') ||
             errorMessage.toLowerCase().includes('too many requests');
 
+          // Check for expired token error (don't retry these)
+          const isExpiredTokenError =
+            errorMessage.toLowerCase().includes('access token') &&
+            errorMessage.toLowerCase().includes('expired');
+
+          // Check for template errors (don't retry these)
+          const isTemplateError =
+            errorMessage.includes('132001') || // Template doesn't exist
+            errorMessage.includes('131008') || // Missing parameters
+            errorMessage.includes('132000'); // Parameter mismatch
+
           // Check if it's an ExternalServiceException with WhatsApp error code
           if (
             error &&
@@ -215,7 +226,18 @@ export class EventParticipantsService {
               whatsappErrorCode.includes('80009');
           }
 
+          // Don't retry for these error types
+          if (isExpiredTokenError || isTemplateError) {
+            this.logger.error(
+              `❌ Non-retryable error detected (attempt ${attempt}/${maxRetries}): ${errorMessage}`,
+            );
+            throw error;
+          }
+
           if (attempt === maxRetries) {
+            this.logger.error(
+              `❌ Max retries (${maxRetries}) reached. Giving up.`,
+            );
             throw error;
           }
 
@@ -223,13 +245,13 @@ export class EventParticipantsService {
           if (isRateLimitError) {
             const backoffDelay = baseDelay * Math.pow(2, attempt) * 5; // 5s, 10s, 20s
             this.logger.warn(
-              `Rate limit detected. Retrying in ${backoffDelay}ms (attempt ${attempt}/${maxRetries})`,
+              `🟠 Rate limit detected. Retrying in ${backoffDelay}ms (attempt ${attempt}/${maxRetries})`,
             );
             await delay(backoffDelay);
           } else {
             const backoffDelay = baseDelay * Math.pow(2, attempt); // 1s, 2s, 4s
             this.logger.warn(
-              `Error sending message. Retrying in ${backoffDelay}ms (attempt ${attempt}/${maxRetries}): ${errorMessage}`,
+              `⚠️  Error sending message. Retrying in ${backoffDelay}ms (attempt ${attempt}/${maxRetries}): ${errorMessage}`,
             );
             await delay(backoffDelay);
           }
@@ -256,13 +278,23 @@ export class EventParticipantsService {
 
       try {
         // Format phone number (remove any non-digit characters except +)
-        const phoneNumber = String(participant.phoneNumber).replace(
+        let phoneNumber = String(participant.phoneNumber).replace(
           /[^\d+]/g,
           '',
         );
 
-        // Validate phone number format
-        if (!phoneNumber || phoneNumber.length < 10) {
+        // Ensure phone number starts with + (required by WhatsApp API)
+        if (!phoneNumber.startsWith('+')) {
+          // Assume India (+91) if no country code provided
+          phoneNumber = `+91${phoneNumber}`;
+          this.logger.log(
+            `Added country code +91 to phone number: ${phoneNumber}`,
+          );
+        }
+
+        // Validate phone number format (should be +{country_code}{number})
+        if (!phoneNumber || phoneNumber.length < 12) {
+          // Minimum: +91 (2) + 10 digits
           this.logger.warn(
             `Skipping participant ${participant.id} - invalid phone number: ${phoneNumber}`,
           );
@@ -589,10 +621,19 @@ export class EventParticipantsService {
 
     try {
       // Format phone number (remove any non-digit characters except +)
-      const phoneNumber = String(participant.phoneNumber).replace(
+      let phoneNumber = String(participant.phoneNumber).replace(
         /[^\d+]/g,
         '',
       );
+
+      // Ensure phone number starts with + (required by WhatsApp API)
+      if (!phoneNumber.startsWith('+')) {
+        // Assume India (+91) if no country code provided
+        phoneNumber = `+91${phoneNumber}`;
+        this.logger.log(
+          `Added country code +91 to phone number for booking confirmation: ${phoneNumber}`,
+        );
+      }
 
       // Format event date and time
       const eventDateTime = new Date(event.eventDateTime);
