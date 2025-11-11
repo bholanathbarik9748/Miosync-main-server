@@ -194,17 +194,6 @@ export class EventParticipantsService {
             errorMessage.toLowerCase().includes('rate limit') ||
             errorMessage.toLowerCase().includes('too many requests');
 
-          // Check for expired token error (don't retry these)
-          const isExpiredTokenError =
-            errorMessage.toLowerCase().includes('access token') &&
-            errorMessage.toLowerCase().includes('expired');
-
-          // Check for template errors (don't retry these)
-          const isTemplateError =
-            errorMessage.includes('132001') || // Template doesn't exist
-            errorMessage.includes('131008') || // Missing parameters
-            errorMessage.includes('132000'); // Parameter mismatch
-
           // Check if it's an ExternalServiceException with WhatsApp error code
           if (
             error &&
@@ -224,20 +213,26 @@ export class EventParticipantsService {
               whatsappErrorCode.includes('80007') ||
               whatsappErrorCode.includes('80008') ||
               whatsappErrorCode.includes('80009');
-          }
 
-          // Don't retry for these error types
-          if (isExpiredTokenError || isTemplateError) {
-            this.logger.error(
-              `❌ Non-retryable error detected (attempt ${attempt}/${maxRetries}): ${errorMessage}`,
-            );
-            throw error;
+            // Don't retry for certain permanent errors
+            const permanentErrors = [
+              '190',
+              '132001',
+              '131008',
+              '132000',
+              '100',
+            ];
+            if (
+              permanentErrors.some((code) => whatsappErrorCode.includes(code))
+            ) {
+              this.logger.error(
+                `Permanent error detected (${whatsappErrorCode}). Not retrying.`,
+              );
+              throw error; // Don't retry permanent errors
+            }
           }
 
           if (attempt === maxRetries) {
-            this.logger.error(
-              `❌ Max retries (${maxRetries}) reached. Giving up.`,
-            );
             throw error;
           }
 
@@ -245,13 +240,13 @@ export class EventParticipantsService {
           if (isRateLimitError) {
             const backoffDelay = baseDelay * Math.pow(2, attempt) * 5; // 5s, 10s, 20s
             this.logger.warn(
-              `🟠 Rate limit detected. Retrying in ${backoffDelay}ms (attempt ${attempt}/${maxRetries})`,
+              `Rate limit detected. Retrying in ${backoffDelay}ms (attempt ${attempt}/${maxRetries})`,
             );
             await delay(backoffDelay);
           } else {
             const backoffDelay = baseDelay * Math.pow(2, attempt); // 1s, 2s, 4s
             this.logger.warn(
-              `⚠️  Error sending message. Retrying in ${backoffDelay}ms (attempt ${attempt}/${maxRetries}): ${errorMessage}`,
+              `Error sending message. Retrying in ${backoffDelay}ms (attempt ${attempt}/${maxRetries}): ${errorMessage}`,
             );
             await delay(backoffDelay);
           }
@@ -277,11 +272,15 @@ export class EventParticipantsService {
       }
 
       try {
-        // Format phone number (remove any non-digit characters except +)
-        let phoneNumber = String(participant.phoneNumber).replace(
-          /[^\d+]/g,
-          '',
-        );
+        // Validate and format phone number
+        let phoneNumber = String(participant.phoneNumber)
+          .trim()
+          .replace(/[^\d+]/g, '');
+
+        // Remove leading zeros (common input error)
+        if (phoneNumber.startsWith('0') && !phoneNumber.startsWith('+')) {
+          phoneNumber = phoneNumber.substring(1);
+        }
 
         // Ensure phone number starts with + (required by WhatsApp API)
         if (!phoneNumber.startsWith('+')) {
@@ -293,16 +292,59 @@ export class EventParticipantsService {
         }
 
         // Validate phone number format (should be +{country_code}{number})
+        // Minimum for India: +91 (3) + 10 digits = 13 characters
         if (!phoneNumber || phoneNumber.length < 12) {
-          // Minimum: +91 (2) + 10 digits
           this.logger.warn(
-            `Skipping participant ${participant.id} - invalid phone number: ${phoneNumber}`,
+            `Skipping participant ${participant.id} - invalid phone number: ${phoneNumber} (too short)`,
           );
           failureCount++;
           failedParticipants.push({
             id: participant.id,
             phoneNumber,
-            error: 'Invalid phone number format',
+            error: `Invalid phone number format (length: ${phoneNumber.length})`,
+          });
+          continue;
+        }
+
+        // Check if number contains only valid characters
+        if (!/^\+\d{10,15}$/.test(phoneNumber)) {
+          this.logger.warn(
+            `Skipping participant ${participant.id} - invalid phone number format: ${phoneNumber}`,
+          );
+          failureCount++;
+          failedParticipants.push({
+            id: participant.id,
+            phoneNumber,
+            error:
+              'Invalid phone number format (must be +country_code + digits)',
+          });
+          continue;
+        }
+
+        // Validate required participant data
+        if (!participant.name || !participant.id) {
+          this.logger.warn(
+            `Skipping participant ${participant.id} - missing name or ID`,
+          );
+          failureCount++;
+          failedParticipants.push({
+            id: participant.id || 'unknown',
+            phoneNumber,
+            error: 'Missing participant name or ID',
+          });
+          continue;
+        }
+
+        // Validate event data
+        if (!event.eventName) {
+          this.logger.warn(
+            `Skipping participant ${participant.id} - missing event name`,
+          );
+          failureCount++;
+          failedParticipants.push({
+            id: participant.id,
+            phoneNumber,
+            error: 'Missing event name',
           });
           continue;
         }
@@ -320,11 +362,21 @@ export class EventParticipantsService {
             components: [
               {
                 type: 'header',
-                parameters: [{ type: 'text', text: String(participant.name) }],
+                parameters: [
+                  {
+                    type: 'text',
+                    text: String(participant.name).substring(0, 60), // Limit to 60 chars
+                  },
+                ],
               },
               {
                 type: 'body',
-                parameters: [{ type: 'text', text: String(event.eventName) }],
+                parameters: [
+                  {
+                    type: 'text',
+                    text: String(event.eventName).substring(0, 100), // Limit to 100 chars
+                  },
+                ],
               },
               {
                 type: 'button',
@@ -620,11 +672,15 @@ export class EventParticipantsService {
     }
 
     try {
-      // Format phone number (remove any non-digit characters except +)
-      let phoneNumber = String(participant.phoneNumber).replace(
-        /[^\d+]/g,
-        '',
-      );
+      // Validate and format phone number
+      let phoneNumber = String(participant.phoneNumber)
+        .trim()
+        .replace(/[^\d+]/g, '');
+
+      // Remove leading zeros (common input error)
+      if (phoneNumber.startsWith('0') && !phoneNumber.startsWith('+')) {
+        phoneNumber = phoneNumber.substring(1);
+      }
 
       // Ensure phone number starts with + (required by WhatsApp API)
       if (!phoneNumber.startsWith('+')) {
@@ -635,32 +691,67 @@ export class EventParticipantsService {
         );
       }
 
-      // Format event date and time
-      const eventDateTime = new Date(event.eventDateTime);
-      const formattedDateTime = eventDateTime.toLocaleString('en-US', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true,
-      });
+      // Validate phone number format
+      if (!/^\+\d{10,15}$/.test(phoneNumber)) {
+        this.logger.error(
+          `Invalid phone number format for booking confirmation: ${phoneNumber}`,
+        );
+        return; // Skip sending if invalid
+      }
 
-      // Get check-in/entry time - prefer participant.time, then checkIn, then event time
-      let checkInEntry = '';
-      if (participant.time) {
-        checkInEntry = String(participant.time);
-      } else if (participant.checkIn) {
-        const checkInDate = new Date(participant.checkIn);
-        checkInEntry = checkInDate.toLocaleString('en-US', {
-          month: 'short',
+      // Validate required data
+      if (!participant.name || !event.eventName || !event.venue) {
+        this.logger.error(
+          `Missing required data for booking confirmation: participant.name=${participant.name}, event.eventName=${event.eventName}, event.venue=${event.venue}`,
+        );
+        return; // Skip sending if data missing
+      }
+
+      // Format event date and time with error handling
+      let eventDateTime: Date | null = null;
+      let formattedDateTime: string;
+      try {
+        eventDateTime = new Date(event.eventDateTime);
+        if (isNaN(eventDateTime.getTime())) {
+          throw new Error('Invalid date');
+        }
+        formattedDateTime = eventDateTime.toLocaleString('en-US', {
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
           day: 'numeric',
           hour: '2-digit',
           minute: '2-digit',
           hour12: true,
         });
-      } else {
+      } catch {
+        this.logger.error(
+          `Invalid event date time: ${String(event.eventDateTime)}`,
+        );
+        formattedDateTime = 'TBD';
+        eventDateTime = null;
+      }
+
+      // Get check-in/entry time - prefer participant.time, then checkIn, then event time
+      let checkInEntry = 'TBD';
+      if (participant.time) {
+        checkInEntry = String(participant.time).substring(0, 50);
+      } else if (participant.checkIn) {
+        try {
+          const checkInDate = new Date(participant.checkIn);
+          if (!isNaN(checkInDate.getTime())) {
+            checkInEntry = checkInDate.toLocaleString('en-US', {
+              month: 'short',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: true,
+            });
+          }
+        } catch {
+          // Use default 'TBD' if date parsing fails
+        }
+      } else if (eventDateTime !== null && !isNaN(eventDateTime.getTime())) {
         // Use event time as fallback
         checkInEntry = eventDateTime.toLocaleString('en-US', {
           hour: '2-digit',
@@ -669,7 +760,7 @@ export class EventParticipantsService {
         });
       }
 
-      // Prepare template payload
+      // Prepare template payload with character limits
       const payload = {
         messaging_product: 'whatsapp',
         to: phoneNumber,
@@ -681,11 +772,20 @@ export class EventParticipantsService {
             {
               type: 'body',
               parameters: [
-                { type: 'text', text: String(participant.name) }, // {{1}}
-                { type: 'text', text: String(event.eventName) }, // {{2}}
-                { type: 'text', text: formattedDateTime }, // {{3}}
-                { type: 'text', text: checkInEntry }, // {{4}}
-                { type: 'text', text: String(event.venue) }, // {{5}}
+                {
+                  type: 'text',
+                  text: String(participant.name).substring(0, 60),
+                }, // {{1}}
+                {
+                  type: 'text',
+                  text: String(event.eventName).substring(0, 100),
+                }, // {{2}}
+                {
+                  type: 'text',
+                  text: formattedDateTime.substring(0, 100),
+                }, // {{3}}
+                { type: 'text', text: checkInEntry.substring(0, 50) }, // {{4}}
+                { type: 'text', text: String(event.venue).substring(0, 100) }, // {{5}}
               ],
             },
           ],

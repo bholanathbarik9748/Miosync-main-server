@@ -57,6 +57,61 @@ $ npm run test:e2e
 $ npm run test:cov
 ```
 
+## WhatsApp Integration
+
+This application integrates with WhatsApp Business API for sending event notifications. 
+
+### ⚠️ Important: First-Time Setup / Troubleshooting
+
+If you're experiencing issues with WhatsApp messaging (messages not sending), please check:
+
+1. **📖 Read the Fix Summary:** See [`WHATSAPP_FIX_SUMMARY.md`](./WHATSAPP_FIX_SUMMARY.md) for complete issue analysis and solutions
+2. **🔧 Test Your Configuration:** Run `node test-whatsapp-config.js` to diagnose configuration issues
+3. **📚 Detailed Troubleshooting:** See [`WHATSAPP_TROUBLESHOOTING.md`](./WHATSAPP_TROUBLESHOOTING.md) for comprehensive solutions
+
+### Quick Configuration Check
+
+```bash
+# Test your WhatsApp configuration
+node test-whatsapp-config.js
+
+# Monitor WhatsApp message sending
+tail -f logs/combined.log | grep -i whatsapp
+
+# Check for errors
+tail -f logs/error.log | grep -i whatsapp
+```
+
+### Required Environment Variables
+
+Add these to your `.env` file:
+
+```env
+# WhatsApp Business API (REQUIRED)
+WA_TOKEN=your_system_user_access_token_here
+WA_PHONE_NUMBER_ID=your_phone_number_id_here
+WA_BUSINESS_ACCOUNT_ID=your_waba_id_here
+
+# Optional (defaults shown)
+WA_API_BASE=https://graph.facebook.com
+WA_API_VERSION=v22.0
+WA_WEBHOOK_VERIFY_TOKEN=your_webhook_verify_token
+```
+
+**Get your credentials:**
+- System User Token: https://business.facebook.com/settings/system-users
+- Phone Number ID: https://developers.facebook.com/apps (WhatsApp → API Setup)
+- WABA ID: https://business.facebook.com/wa/manage/home/
+
+### Common Issues & Solutions
+
+| Issue | Solution |
+|-------|----------|
+| ❌ Error 190 - Token expired | Generate new System User Token (see WHATSAPP_FIX_SUMMARY.md) |
+| ❌ Error 132001 - Template not found | Create/approve template in WhatsApp Manager |
+| ❌ Error 131008 - Missing parameters | Verify template parameters match code |
+| ⚠️ Some numbers not receiving | Check phone number format (+country_code) |
+
 ## Deployment
 
 When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.

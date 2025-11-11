@@ -5,12 +5,8 @@ import { WinstonModule } from 'nest-winston';
 import { loggerConfig } from './config/logger.config';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
-import { EnvValidator } from './common/validators/env.validator';
 
 async function App() {
-  // Validate environment variables before starting the app
-  EnvValidator.validateAndLog();
-
   const app = await NestFactory.create(AppModule, {
     logger: WinstonModule.createLogger(loggerConfig),
   });

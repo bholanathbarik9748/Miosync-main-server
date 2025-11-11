@@ -123,48 +123,44 @@ export class WhatsAppService {
   private base = process.env.WA_API_BASE || 'https://graph.facebook.com';
   private version = process.env.WA_API_VERSION || 'v22.0';
 
-  // Rate limiting tracking
-  private lastMessageTime = 0;
-  private messageCount = 0;
-  private readonly MIN_MESSAGE_INTERVAL = 1500; // 1.5 seconds between messages
-  private readonly MAX_HOURLY_MESSAGES = 1000; // Default tier limit
-
   constructor(
     @InjectRepository(EventParticipant)
     private readonly participantRepository: Repository<EventParticipant>,
     @InjectRepository(WhatsAppMessageToken)
     private readonly messageTokenRepository: Repository<WhatsAppMessageToken>,
   ) {
-    // Validate configuration on service initialization
     this.validateConfiguration();
   }
 
   /**
-   * Validate WhatsApp configuration
+   * Validate WhatsApp configuration at startup
    */
   private validateConfiguration(): void {
+    const issues: string[] = [];
+
     if (!this.token) {
-      this.logger.error(
-        '🚨 WA_TOKEN is not set! WhatsApp messaging will not work.',
-      );
-      this.logger.error(
-        '   Get token from: https://business.facebook.com/settings/system-users',
-      );
+      issues.push('WA_TOKEN is not set');
+    } else if (this.token.length < 50) {
+      issues.push('WA_TOKEN appears to be invalid (too short)');
     }
 
     if (!this.phoneId) {
-      this.logger.error(
-        '🚨 WA_PHONE_NUMBER_ID is not set! WhatsApp messaging will not work.',
-      );
-      this.logger.error(
-        '   Get it from: https://developers.facebook.com/apps → WhatsApp → API Setup',
-      );
+      issues.push('WA_PHONE_NUMBER_ID is not set');
     }
 
-    if (this.token && this.phoneId) {
-      this.logger.log('✅ WhatsApp configuration loaded successfully');
-      this.logger.log(`   API Version: ${this.version}`);
-      this.logger.log(`   API Base: ${this.base}`);
+    if (issues.length > 0) {
+      this.logger.error(
+        '🚨 WhatsApp Configuration Issues:',
+        issues.join(', '),
+      );
+      this.logger.error(
+        'WhatsApp messaging will not work until these issues are resolved.',
+      );
+      this.logger.error(
+        'Please check your .env file and add the required variables.',
+      );
+    } else {
+      this.logger.log('✅ WhatsApp configuration validated successfully');
     }
   }
 
@@ -179,132 +175,34 @@ export class WhatsAppService {
     };
   }
 
-  /**
-   * Validate phone number format (E.164)
-   */
-  private validatePhoneNumber(phoneNumber: string): {
-    isValid: boolean;
-    formatted: string;
-    error?: string;
-  } {
-    // Remove all non-digit characters except +
-    let formatted = phoneNumber.replace(/[^\d+]/g, '');
-
-    // Check if it starts with +
-    if (!formatted.startsWith('+')) {
-      // Assume India (+91) if no country code
-      formatted = `+91${formatted}`;
-    }
-
-    // Validate length (minimum +91 + 10 digits = 13 characters)
-    if (formatted.length < 12) {
-      return {
-        isValid: false,
-        formatted,
-        error: `Invalid phone number: ${phoneNumber}. Must be in E.164 format (+country_code + number)`,
-      };
-    }
-
-    // Check format
-    const e164Regex = /^\+[1-9]\d{1,14}$/;
-    if (!e164Regex.test(formatted)) {
-      return {
-        isValid: false,
-        formatted,
-        error: `Invalid phone number format: ${formatted}. Expected E.164 format.`,
-      };
-    }
-
-    return {
-      isValid: true,
-      formatted,
-    };
-  }
-
-  /**
-   * Validate template payload before sending
-   */
-  private validateTemplatePayload(payload: TemplatePayload): {
-    isValid: boolean;
-    errors: string[];
-  } {
-    const errors: string[] = [];
-
-    if (!payload.to) {
-      errors.push('Missing "to" field (recipient phone number)');
-    }
-
-    if (!payload.template?.name) {
-      errors.push('Missing template name');
-    }
-
-    if (!payload.template?.language?.code) {
-      errors.push('Missing template language code');
-    }
-
-    // Validate phone number
-    if (payload.to) {
-      const phoneValidation = this.validatePhoneNumber(payload.to);
-      if (!phoneValidation.isValid) {
-        errors.push(phoneValidation.error || 'Invalid phone number');
-      }
-    }
-
-    return {
-      isValid: errors.length === 0,
-      errors,
-    };
-  }
-
   async sendTemplate(
     payload: TemplatePayload,
   ): Promise<WhatsAppMessageResponse> {
     try {
       // Validate payload before sending
-      const validation = this.validateTemplatePayload(payload);
-      if (!validation.isValid) {
-        const errorMessage = `Invalid template payload: ${validation.errors.join(', ')}`;
-        this.logger.error(errorMessage);
-        throw new ExternalServiceException(
-          errorMessage,
-          ErrorCode.INTERNAL_SERVER_ERROR,
-          'WHATSAPP',
-          { validationErrors: validation.errors },
-        );
+      if (!payload.to || !payload.template?.name) {
+        throw new Error('Invalid payload: missing required fields');
       }
 
-      // Validate and format phone number
-      const phoneValidation = this.validatePhoneNumber(payload.to);
-      if (!phoneValidation.isValid) {
-        throw new ExternalServiceException(
-          phoneValidation.error || 'Invalid phone number',
-          ErrorCode.INTERNAL_SERVER_ERROR,
-          'WHATSAPP',
-          { phoneNumber: payload.to },
-        );
+      // Ensure phone number has country code
+      let phoneNumber = payload.to.replace(/[^\d+]/g, '');
+      if (!phoneNumber.startsWith('+')) {
+        phoneNumber = `+91${phoneNumber}`;
+        payload.to = phoneNumber;
       }
-
-      // Use formatted phone number
-      const formattedPayload = {
-        ...payload,
-        to: phoneValidation.formatted,
-      };
 
       this.logger.log(
-        `Sending template message to ${formattedPayload.to} with template ${formattedPayload.template.name}`,
+        `Sending template message to ${payload.to} with template ${payload.template.name}`,
       );
 
       const url = `${this.getUrl()}/messages`;
-      const response = await axios.post<WhatsAppMessageResponse>(
-        url,
-        formattedPayload,
-        {
-          headers: this.getAuthHeaders(),
-        },
-      );
+      const response = await axios.post<WhatsAppMessageResponse>(url, payload, {
+        headers: this.getAuthHeaders(),
+        timeout: 30000, // 30 second timeout
+      });
 
       this.logger.log(
-        `✅ Template message sent successfully. Message ID: ${response.data.messages?.[0]?.id}`,
+        `Template message sent successfully. Message ID: ${response.data.messages?.[0]?.id}`,
       );
 
       return response.data;
@@ -316,40 +214,38 @@ export class WhatsAppService {
         const errorMessage = waError.message || 'WhatsApp API error';
         const errorCode = waError.code?.toString() || 'UNKNOWN';
 
-        // Enhanced error logging with specific guidance
-        let errorGuidance = '';
-        switch (errorCode) {
-          case '190':
-            errorGuidance =
-              '\n   🔴 ACCESS TOKEN EXPIRED! Generate new token at: https://business.facebook.com/settings/system-users';
-            break;
-          case '132001':
-            errorGuidance = `\n   🟡 Template "${payload.template.name}" doesn't exist or isn't approved. Check: https://business.facebook.com/wa/manage/message-templates/`;
-            break;
-          case '131008':
-            errorGuidance =
-              '\n   🟡 Missing required template parameters. Verify template configuration.';
-            break;
-          case '132000':
-            errorGuidance =
-              '\n   🟡 Parameter count mismatch. Check template definition vs. payload.';
-            break;
-          case '80007':
-          case '80008':
-          case '80009':
-            errorGuidance =
-              '\n   🟠 RATE LIMIT exceeded. Reduce message frequency or upgrade tier.';
-            break;
-        }
-
+        // Enhanced error logging with actionable information
         this.logger.error(
-          `WhatsApp API error [${errorCode}]: ${errorMessage}${errorGuidance}`,
+          `WhatsApp API error [${errorCode}]: ${errorMessage}`,
           {
             template: payload.template.name,
             to: payload.to,
             whatsappError: waError,
+            errorCode,
+            errorType: waError.type,
+            fbtraceId: waError.fbtrace_id,
+            statusCode: axiosError.response?.status,
           },
         );
+
+        // Add specific error handling guidance
+        if (errorCode === '190') {
+          this.logger.error(
+            '🚨 ACCESS TOKEN EXPIRED! Please update WA_TOKEN in your .env file. Generate new token at: https://business.facebook.com/settings/system-users',
+          );
+        } else if (errorCode === '132001') {
+          this.logger.error(
+            `🚨 TEMPLATE NOT FOUND! Template "${payload.template.name}" does not exist or is not approved. Check at: https://business.facebook.com/wa/manage/message-templates/`,
+          );
+        } else if (errorCode === '131008') {
+          this.logger.error(
+            '🚨 MISSING PARAMETERS! Template requires parameters that were not provided.',
+          );
+        } else if (errorCode === '132000') {
+          this.logger.error(
+            '🚨 PARAMETER MISMATCH! Number of parameters does not match template definition.',
+          );
+        }
 
         throw new ExternalServiceException(
           errorMessage,
@@ -361,7 +257,6 @@ export class WhatsAppService {
             templateName: payload.template.name,
             languageCode: payload.template.language.code,
             fbtraceId: waError.fbtrace_id,
-            guidance: errorGuidance.trim(),
           },
         );
       }
@@ -621,8 +516,21 @@ export class WhatsAppService {
     buttonId: string,
   ): Promise<void> {
     try {
+      // Validate input parameters
+      if (!messageId || !phoneNumber || !buttonTitle) {
+        this.logger.warn(
+          'Invalid input to handleButtonResponseByMessageId: missing required parameters',
+        );
+        return;
+      }
+
       // Normalize phone number
-      const normalizedPhone = phoneNumber.replace(/[^\d+]/g, '');
+      const normalizedPhone = phoneNumber.trim().replace(/[^\d+]/g, '');
+
+      if (!normalizedPhone) {
+        this.logger.warn('Empty phone number after normalization');
+        return;
+      }
 
       // Find the most recent unprocessed message token for this phone number
       // This token was stored when we sent the booking confirmation message
@@ -639,7 +547,7 @@ export class WhatsAppService {
       let eventId: string | null = null;
       let storedMessageId: string | null = null;
 
-      if (tokenData && tokenData.length > 0) {
+      if (tokenData && Array.isArray(tokenData) && tokenData.length > 0) {
         // Found participant via message token
         participantId = tokenData[0].participantId;
         eventId = tokenData[0].eventId;
@@ -653,38 +561,37 @@ export class WhatsAppService {
           `Message token not found for phone ${phoneNumber}, falling back to phone number lookup`,
         );
 
-        let participant = await this.participantRepository.query(
-          `SELECT * FROM "event_participants" 
-           WHERE REPLACE(REPLACE("phoneNumber", ' ', ''), '-', '') = $1 
-           OR "phoneNumber" = $1
-           ORDER BY "createdAt" DESC 
-           LIMIT 1`,
-          [normalizedPhone],
-        );
+        // Try multiple phone number formats
+        const phoneFormats = [
+          normalizedPhone,
+          normalizedPhone.startsWith('+') ? normalizedPhone : `+${normalizedPhone}`,
+          normalizedPhone.startsWith('+91') ? normalizedPhone : `+91${normalizedPhone.replace(/^\+/, '')}`,
+        ];
 
-        // If not found, try with different phone number formats
-        if (!participant || participant.length === 0) {
-          const phoneWithPlus = normalizedPhone.startsWith('+')
-            ? normalizedPhone
-            : `+${normalizedPhone}`;
+        let participant: any[] | null = null;
+        for (const phoneFormat of phoneFormats) {
           participant = await this.participantRepository.query(
             `SELECT * FROM "event_participants" 
              WHERE REPLACE(REPLACE("phoneNumber", ' ', ''), '-', '') = $1 
              OR "phoneNumber" = $1
              ORDER BY "createdAt" DESC 
              LIMIT 1`,
-            [phoneWithPlus],
+            [phoneFormat],
           );
+
+          if (participant && Array.isArray(participant) && participant.length > 0) {
+            break;
+          }
         }
 
-        if (!participant || participant.length === 0) {
+        if (!participant || !Array.isArray(participant) || participant.length === 0) {
           this.logger.warn(
             `Participant not found for phone number: ${phoneNumber} (normalized: ${normalizedPhone})`,
           );
           return;
         }
 
-        const participantData = participant[0];
+        const participantData = participant[0] as { id: string; eventId: string };
         participantId = participantData.id;
         eventId = participantData.eventId;
       }
