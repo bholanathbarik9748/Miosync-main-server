@@ -369,7 +369,7 @@ export class WhatsAppService {
 
               if (participantInfo) {
                 this.logger.log(
-                  `${statusEmoji} Message ${messageStatus.toUpperCase()} - Participant ID: ${participantInfo.participantId} | Phone: ${recipientId} | Message ID: ${messageId} | Template: ${participantInfo.templateName || 'N/A'}`,
+                  `${statusEmoji} Message ${messageStatus.toUpperCase()} - Participant: ${participantInfo.participantId} | Name: ${participantInfo.templateName || 'N/A'} | Phone: ${recipientId} | Message ID: ${messageId}`,
                 );
               } else {
                 this.logger.log(
@@ -383,18 +383,59 @@ export class WhatsAppService {
                 status: status.status,
                 recipientId: status.recipient_id,
                 participantId: participantInfo?.participantId || 'Unknown',
+                participantName: participantInfo?.templateName || 'Unknown',
                 eventId: participantInfo?.eventId || 'Unknown',
                 timestamp: new Date(
                   parseInt(status.timestamp) * 1000,
                 ).toISOString(),
+                conversationCategory: status.conversation?.origin?.type,
                 errors: status.errors,
               });
 
-              // If message failed, log error details
+              // If message failed, log error details with troubleshooting
               if (messageStatus === 'failed' && status.errors) {
                 this.logger.error(
                   `❌ Message FAILED to deliver - Participant ID: ${participantInfo?.participantId || 'Unknown'} | Phone: ${recipientId} | Message ID: ${messageId}`,
+                );
+                this.logger.error(
+                  'Failure Details:',
                   JSON.stringify(status.errors, null, 2),
+                );
+                
+                // Log common failure reasons
+                const errorCode = status.errors[0]?.code;
+                if (errorCode === 1) {
+                  this.logger.error(
+                    '🚨 REASON: Phone number not registered on WhatsApp or invalid',
+                  );
+                } else if (errorCode === 131026) {
+                  this.logger.error(
+                    '🚨 REASON: Message undeliverable - User may have blocked business number',
+                  );
+                } else if (errorCode === 131047) {
+                  this.logger.error(
+                    '🚨 REASON: Re-engagement message - User has not messaged you in 24 hours',
+                  );
+                } else if (errorCode === 131051) {
+                  this.logger.error(
+                    '🚨 REASON: Unsupported message type',
+                  );
+                }
+              }
+
+              // Log if message was sent but not delivered (stuck in 'sent' status)
+              if (messageStatus === 'sent') {
+                this.logger.warn(
+                  `⏳ Message SENT but not yet DELIVERED to ${recipientId}. This could mean:`,
+                );
+                this.logger.warn(
+                  '  - User is offline/phone is off',
+                );
+                this.logger.warn(
+                  '  - User has no internet connection',
+                );
+                this.logger.warn(
+                  '  - Message is queued at WhatsApp',
                 );
               }
             }
