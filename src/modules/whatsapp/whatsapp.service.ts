@@ -579,7 +579,7 @@ export class WhatsAppService {
         `SELECT "participantId", "eventId", "messageId" 
          FROM "whatsapp_message_tokens" 
          WHERE "phoneNumber" = $1 AND "isProcessed" = false 
-         ORDER BY "createdAt" DESC 
+         ORDER BY "created_at" DESC 
          LIMIT 1`,
         [normalizedPhone],
       );
@@ -615,7 +615,7 @@ export class WhatsAppService {
             `SELECT * FROM "event_participants" 
              WHERE REPLACE(REPLACE("phoneNumber", ' ', ''), '-', '') = $1 
              OR "phoneNumber" = $1
-             ORDER BY "createdAt" DESC 
+             ORDER BY "created_at" DESC 
              LIMIT 1`,
             [phoneFormat],
           );
@@ -706,7 +706,7 @@ export class WhatsAppService {
       `SELECT "messageId" 
        FROM "whatsapp_message_tokens" 
        WHERE "phoneNumber" = $1 AND "isProcessed" = false 
-       ORDER BY "createdAt" DESC 
+       ORDER BY "created_at" DESC 
        LIMIT 1`,
       [normalizedPhone],
     );
@@ -741,7 +741,7 @@ export class WhatsAppService {
     try {
       await this.messageTokenRepository.query(
         `INSERT INTO "whatsapp_message_tokens" 
-         ("messageId", "participantId", "eventId", "phoneNumber", "templateName", "isProcessed", "createdAt", "updatedAt") 
+         ("messageId", "participantId", "eventId", "phoneNumber", "templateName", "isProcessed", "created_at", "updated_at") 
          VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW()) 
          ON CONFLICT ("messageId") DO NOTHING`,
         [
@@ -843,7 +843,7 @@ export class WhatsAppService {
     try {
       await this.messageTokenRepository.query(
         `UPDATE "whatsapp_message_tokens" 
-         SET "isProcessed" = true, "updatedAt" = NOW() 
+         SET "isProcessed" = true, "updated_at" = NOW() 
          WHERE "messageId" = $1`,
         [messageId],
       );
@@ -894,7 +894,7 @@ export class WhatsAppService {
          FROM "event_participants" 
          WHERE REPLACE(REPLACE("phoneNumber", ' ', ''), '-', '') = $1 
          OR "phoneNumber" = $1
-         ORDER BY "createdAt" DESC 
+         ORDER BY "created_at" DESC 
          LIMIT 1`,
         [normalizedPhone],
       );
@@ -909,7 +909,7 @@ export class WhatsAppService {
            FROM "event_participants" 
            WHERE REPLACE(REPLACE("phoneNumber", ' ', ''), '-', '') = $1 
            OR "phoneNumber" = $1
-           ORDER BY "createdAt" DESC 
+           ORDER BY "created_at" DESC 
            LIMIT 1`,
           [phoneWithPlus],
         );
