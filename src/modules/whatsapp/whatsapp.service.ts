@@ -192,7 +192,7 @@ export class WhatsAppService {
       }
 
       this.logger.log(
-        `Sending template message to ${payload.to} with template ${payload.template.name}`,
+        `📤 [WhatsApp] Sending template message - To: ${payload.to}, Template: ${payload.template.name}, Language: ${payload.template.language.code}`,
       );
 
       const url = `${this.getUrl()}/messages`;
@@ -201,9 +201,52 @@ export class WhatsAppService {
         timeout: 30000, // 30 second timeout
       });
 
+      // Log FULL response for debugging
       this.logger.log(
-        `Template message sent successfully. Message ID: ${response.data.messages?.[0]?.id}`,
+        `📋 [WhatsApp] FULL API RESPONSE: ${JSON.stringify(response.data, null, 2)}`,
       );
+
+      const messageId = response.data.messages?.[0]?.id;
+      const waId = response.data.contacts?.[0]?.wa_id;
+      const contactInput = response.data.contacts?.[0]?.input;
+
+      // IMPORTANT: WhatsApp API can return success (200 OK) even when messages won't deliver
+      // This happens when:
+      // 1. App is not fully verified (24-hour messaging window restriction)
+      // 2. User hasn't messaged you in last 24 hours
+      // 3. Template is not approved
+      // The ONLY way to know if message actually delivered is via webhook status updates
+
+      if (messageId) {
+        this.logger.log(
+          `✅ [WhatsApp] API accepted message - Message ID: ${messageId}`,
+        );
+        if (waId) {
+          this.logger.log(
+            `✅ [WhatsApp] Phone number is on WhatsApp - WhatsApp ID: ${waId}`,
+          );
+        } else {
+          this.logger.warn(
+            `⚠️ [WhatsApp] No WhatsApp ID in response - number may not be on WhatsApp`,
+          );
+        }
+        this.logger.warn(
+          `⚠️ [WhatsApp] IMPORTANT: API success does NOT guarantee delivery!`,
+        );
+        this.logger.warn(
+          `⚠️ [WhatsApp] If app is NOT fully verified, you can only message users who messaged you in last 24 hours`,
+        );
+        this.logger.log(
+          `📱 [WhatsApp] Check webhook logs for actual delivery status ('delivered' or 'failed')`,
+        );
+      } else {
+        this.logger.error(
+          `❌ [WhatsApp] API returned success but NO message ID - message was NOT accepted`,
+        );
+        this.logger.error(
+          `❌ [WhatsApp] Check: app verification status, template approval, 24-hour window`,
+        );
+      }
 
       return response.data;
     } catch (error) {
@@ -216,17 +259,13 @@ export class WhatsAppService {
 
         // Enhanced error logging with actionable information
         this.logger.error(
-          `WhatsApp API error [${errorCode}]: ${errorMessage}`,
-          {
-            template: payload.template.name,
-            to: payload.to,
-            whatsappError: waError,
-            errorCode,
-            errorType: waError.type,
-            fbtraceId: waError.fbtrace_id,
-            statusCode: axiosError.response?.status,
-          },
+          `❌ [WhatsApp] API error [${errorCode}]: ${errorMessage}`,
         );
+        this.logger.error(`[WhatsApp] Template: ${payload.template.name}`);
+        this.logger.error(`[WhatsApp] To: ${payload.to}`);
+        this.logger.error(`[WhatsApp] Error Type: ${waError.type}`);
+        this.logger.error(`[WhatsApp] FB Trace ID: ${waError.fbtrace_id}`);
+        this.logger.error(`[WhatsApp] Status Code: ${axiosError.response?.status}`);
 
         // Add specific error handling guidance
         if (errorCode === '190') {
@@ -265,7 +304,13 @@ export class WhatsAppService {
       const errorMessage =
         axiosError.message || 'Failed to send template message';
       this.logger.error(
-        `Failed to send template message: ${errorMessage}`,
+        `❌ [WhatsApp] Network/Unknown error: ${errorMessage}`,
+      );
+      this.logger.error(
+        `[WhatsApp] Template: ${payload.template.name}, To: ${payload.to}`,
+      );
+      this.logger.error(
+        `[WhatsApp] Stack trace:`,
         axiosError.stack,
       );
 
@@ -282,26 +327,30 @@ export class WhatsAppService {
 
   async processWebhookEvent(payload: WhatsAppWebhookPayload): Promise<void> {
     try {
+      this.logger.log(`📥 [WhatsApp] Processing webhook event`);
+      
       // Validate payload structure
       if (!payload || !payload.object) {
-        this.logger.warn('Received webhook with invalid or missing payload');
+        this.logger.warn('⚠️ [WhatsApp] Received webhook with invalid or missing payload');
         return;
       }
 
       // WhatsApp webhook payload structure
       if (payload.object !== 'whatsapp_business_account') {
         this.logger.warn(
-          `Received webhook with unexpected object type: ${payload.object}`,
+          `⚠️ [WhatsApp] Received webhook with unexpected object type: ${payload.object}`,
         );
         return;
       }
 
       if (!payload.entry || !Array.isArray(payload.entry)) {
         this.logger.warn(
-          'Received webhook with missing or invalid entry array',
+          '⚠️ [WhatsApp] Received webhook with missing or invalid entry array',
         );
         return;
       }
+      
+      this.logger.log(`[WhatsApp] Processing ${payload.entry.length} webhook entries`);
 
       // Process each entry
       for (const entry of payload.entry) {
@@ -320,7 +369,7 @@ export class WhatsAppService {
 
           // Log the field type for debugging
           this.logger.log(
-            `Processing webhook change for field: ${change.field}`,
+            `📌 [WhatsApp] Processing webhook change for field: ${change.field}`,
           );
 
           // Process status updates (message delivery status)
@@ -369,56 +418,58 @@ export class WhatsAppService {
 
               if (participantInfo) {
                 this.logger.log(
-                  `${statusEmoji} Message ${messageStatus.toUpperCase()} - Participant: ${participantInfo.participantId} | Name: ${participantInfo.templateName || 'N/A'} | Phone: ${recipientId} | Message ID: ${messageId}`,
+                  `${statusEmoji} [WhatsApp] Message ${messageStatus.toUpperCase()} - Participant: ${participantInfo.participantId} | Template: ${participantInfo.templateName || 'N/A'} | Phone: ${recipientId} | Message ID: ${messageId}`,
                 );
               } else {
                 this.logger.log(
-                  `${statusEmoji} Message ${messageStatus.toUpperCase()} - Phone: ${recipientId} | Message ID: ${messageId}`,
+                  `${statusEmoji} [WhatsApp] Message ${messageStatus.toUpperCase()} - Phone: ${recipientId} | Message ID: ${messageId}`,
                 );
               }
 
               // Log detailed status information
-              this.logger.log(`📱 WhatsApp Status Update Details`, {
-                messageId: status.id,
-                status: status.status,
-                recipientId: status.recipient_id,
-                participantId: participantInfo?.participantId || 'Unknown',
-                participantName: participantInfo?.templateName || 'Unknown',
-                eventId: participantInfo?.eventId || 'Unknown',
-                timestamp: new Date(
-                  parseInt(status.timestamp) * 1000,
-                ).toISOString(),
-                conversationCategory: status.conversation?.origin?.type,
-                errors: status.errors,
-              });
+              const timestampDate = new Date(parseInt(status.timestamp) * 1000);
+              this.logger.log(`📱 [WhatsApp] Status Update Details:`);
+              this.logger.log(`   - Message ID: ${status.id}`);
+              this.logger.log(`   - Status: ${status.status}`);
+              this.logger.log(`   - Recipient: ${status.recipient_id}`);
+              this.logger.log(`   - Participant ID: ${participantInfo?.participantId || 'Unknown'}`);
+              this.logger.log(`   - Template: ${participantInfo?.templateName || 'Unknown'}`);
+              this.logger.log(`   - Event ID: ${participantInfo?.eventId || 'Unknown'}`);
+              this.logger.log(`   - Timestamp: ${timestampDate.toISOString()}`);
+              if (status.conversation?.origin?.type) {
+                this.logger.log(`   - Conversation Type: ${status.conversation.origin.type}`);
+              }
+              if (status.errors) {
+                this.logger.log(`   - Errors: ${JSON.stringify(status.errors)}`);
+              }
 
               // If message failed, log error details with troubleshooting
               if (messageStatus === 'failed' && status.errors) {
                 this.logger.error(
-                  `❌ Message FAILED to deliver - Participant ID: ${participantInfo?.participantId || 'Unknown'} | Phone: ${recipientId} | Message ID: ${messageId}`,
+                  `❌ [WhatsApp] Message FAILED to deliver`,
                 );
-                this.logger.error(
-                  'Failure Details:',
-                  JSON.stringify(status.errors, null, 2),
-                );
+                this.logger.error(`   - Participant ID: ${participantInfo?.participantId || 'Unknown'}`);
+                this.logger.error(`   - Phone: ${recipientId}`);
+                this.logger.error(`   - Message ID: ${messageId}`);
+                this.logger.error(`   - Failure Details: ${JSON.stringify(status.errors, null, 2)}`);
                 
                 // Log common failure reasons
                 const errorCode = status.errors[0]?.code;
                 if (errorCode === 1) {
                   this.logger.error(
-                    '🚨 REASON: Phone number not registered on WhatsApp or invalid',
+                    '🚨 [WhatsApp] REASON: Phone number not registered on WhatsApp or invalid',
                   );
                 } else if (errorCode === 131026) {
                   this.logger.error(
-                    '🚨 REASON: Message undeliverable - User may have blocked business number',
+                    '🚨 [WhatsApp] REASON: Message undeliverable - User may have blocked business number',
                   );
                 } else if (errorCode === 131047) {
                   this.logger.error(
-                    '🚨 REASON: Re-engagement message - User has not messaged you in 24 hours',
+                    '🚨 [WhatsApp] REASON: Re-engagement message - User has not messaged you in 24 hours',
                   );
                 } else if (errorCode === 131051) {
                   this.logger.error(
-                    '🚨 REASON: Unsupported message type',
+                    '🚨 [WhatsApp] REASON: Unsupported message type',
                   );
                 }
               }
@@ -426,17 +477,12 @@ export class WhatsAppService {
               // Log if message was sent but not delivered (stuck in 'sent' status)
               if (messageStatus === 'sent') {
                 this.logger.warn(
-                  `⏳ Message SENT but not yet DELIVERED to ${recipientId}. This could mean:`,
+                  `⏳ [WhatsApp] Message SENT but not yet DELIVERED to ${recipientId}`,
                 );
-                this.logger.warn(
-                  '  - User is offline/phone is off',
-                );
-                this.logger.warn(
-                  '  - User has no internet connection',
-                );
-                this.logger.warn(
-                  '  - Message is queued at WhatsApp',
-                );
+                this.logger.warn('   Possible reasons:');
+                this.logger.warn('   - User is offline/phone is off');
+                this.logger.warn('   - User has no internet connection');
+                this.logger.warn('   - Message is queued at WhatsApp');
               }
             }
           }
@@ -460,17 +506,15 @@ export class WhatsAppService {
                   interactive.button_reply
                 ) {
                   const buttonResponse = interactive.button_reply;
+                  const timestampDate = new Date(parseInt(timestamp) * 1000);
 
-                  this.logger.log(`📱 WhatsApp Button Response Received`, {
-                    phoneNumber,
-                    messageId,
-                    timestamp: new Date(
-                      parseInt(timestamp) * 1000,
-                    ).toISOString(),
-                    buttonId: buttonResponse.id,
-                    buttonTitle: buttonResponse.title,
-                    responseType: 'button_reply',
-                  });
+                  this.logger.log(`📱 [WhatsApp] Button Response Received:`);
+                  this.logger.log(`   - Phone: ${phoneNumber}`);
+                  this.logger.log(`   - Message ID: ${messageId}`);
+                  this.logger.log(`   - Timestamp: ${timestampDate.toISOString()}`);
+                  this.logger.log(`   - Button ID: ${buttonResponse.id}`);
+                  this.logger.log(`   - Button Title: ${buttonResponse.title}`);
+                  this.logger.log(`   - Response Type: button_reply`);
 
                   // Handle button response and update attending status using message ID
                   this.handleButtonResponseByMessageId(
@@ -494,17 +538,15 @@ export class WhatsAppService {
                   interactive.list_reply
                 ) {
                   const listResponse = interactive.list_reply;
+                  const timestampDate = new Date(parseInt(timestamp) * 1000);
 
-                  this.logger.log(`📱 WhatsApp List Response Received`, {
-                    phoneNumber,
-                    messageId,
-                    timestamp: new Date(
-                      parseInt(timestamp) * 1000,
-                    ).toISOString(),
-                    listItemId: listResponse.id,
-                    listItemTitle: listResponse.title,
-                    responseType: 'list_reply',
-                  });
+                  this.logger.log(`📱 [WhatsApp] List Response Received:`);
+                  this.logger.log(`   - Phone: ${phoneNumber}`);
+                  this.logger.log(`   - Message ID: ${messageId}`);
+                  this.logger.log(`   - Timestamp: ${timestampDate.toISOString()}`);
+                  this.logger.log(`   - List Item ID: ${listResponse.id}`);
+                  this.logger.log(`   - List Item Title: ${listResponse.title}`);
+                  this.logger.log(`   - Response Type: list_reply`);
 
                   // Log detailed response
                   this.logger.log(
@@ -513,14 +555,13 @@ export class WhatsAppService {
                 }
               } else if (message.text) {
                 // Regular text message (not a button response)
-                this.logger.log(`📱 WhatsApp Text Message Received`, {
-                  phoneNumber: message.from,
-                  messageId: message.id,
-                  text: message.text.body,
-                  timestamp: new Date(
-                    parseInt(message.timestamp) * 1000,
-                  ).toISOString(),
-                });
+                const timestampDate = new Date(parseInt(message.timestamp) * 1000);
+                
+                this.logger.log(`📱 [WhatsApp] Text Message Received:`);
+                this.logger.log(`   - Phone: ${message.from}`);
+                this.logger.log(`   - Message ID: ${message.id}`);
+                this.logger.log(`   - Text: ${message.text.body}`);
+                this.logger.log(`   - Timestamp: ${timestampDate.toISOString()}`);
               }
             }
           }
@@ -528,7 +569,10 @@ export class WhatsAppService {
       }
     } catch (error) {
       this.logger.error(
-        `Error processing webhook event: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        `❌ [WhatsApp] Error processing webhook event: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
+      this.logger.error(
+        `[WhatsApp] Stack trace:`,
         error instanceof Error ? error.stack : undefined,
       );
       // Don't throw - we want to log but not cause webhook retries
@@ -537,10 +581,9 @@ export class WhatsAppService {
   }
 
   handleIncomingTextMessage(from: string, text: string): void {
-    this.logger.log('💬 Processing user text message', {
-      from,
-      text,
-    });
+    this.logger.log(`💬 [WhatsApp] Processing user text message:`);
+    this.logger.log(`   - From: ${from}`);
+    this.logger.log(`   - Text: ${text}`);
     // Add your business logic here
   }
 
@@ -575,14 +618,29 @@ export class WhatsAppService {
 
       // Find the most recent unprocessed message token for this phone number
       // This token was stored when we sent the booking confirmation message
-      const tokenData = await this.messageTokenRepository.query(
-        `SELECT "participantId", "eventId", "messageId" 
-         FROM "whatsapp_message_tokens" 
-         WHERE "phoneNumber" = $1 AND "isProcessed" = false 
-         ORDER BY "created_at" DESC 
-         LIMIT 1`,
-        [normalizedPhone],
-      );
+      // Order by id DESC as a fallback (newer records typically have higher UUIDs)
+      // Try created_at first, fallback to createdAt if that fails
+      let tokenData;
+      try {
+        tokenData = await this.messageTokenRepository.query(
+          `SELECT "participantId", "eventId", "messageId" 
+           FROM "whatsapp_message_tokens" 
+           WHERE "phoneNumber" = $1 AND "isProcessed" = false 
+           ORDER BY "created_at" DESC 
+           LIMIT 1`,
+          [normalizedPhone],
+        );
+      } catch (error) {
+        // Fallback if created_at doesn't exist (table might have createdAt)
+        tokenData = await this.messageTokenRepository.query(
+          `SELECT "participantId", "eventId", "messageId" 
+           FROM "whatsapp_message_tokens" 
+           WHERE "phoneNumber" = $1 AND "isProcessed" = false 
+           ORDER BY "createdAt" DESC 
+           LIMIT 1`,
+          [normalizedPhone],
+        );
+      }
 
       let participantId: string | null = null;
       let eventId: string | null = null;
@@ -702,14 +760,28 @@ export class WhatsAppService {
     const normalizedPhone = phoneNumber.replace(/[^\d+]/g, '');
 
     // Find the most recent unprocessed message token for this phone number
-    const tokenData = await this.messageTokenRepository.query(
-      `SELECT "messageId" 
-       FROM "whatsapp_message_tokens" 
-       WHERE "phoneNumber" = $1 AND "isProcessed" = false 
-       ORDER BY "created_at" DESC 
-       LIMIT 1`,
-      [normalizedPhone],
-    );
+    // Try created_at first, fallback to createdAt if that fails
+    let tokenData;
+    try {
+      tokenData = await this.messageTokenRepository.query(
+        `SELECT "messageId" 
+         FROM "whatsapp_message_tokens" 
+         WHERE "phoneNumber" = $1 AND "isProcessed" = false 
+         ORDER BY "created_at" DESC 
+         LIMIT 1`,
+        [normalizedPhone],
+      );
+    } catch (error) {
+      // Fallback if created_at doesn't exist (table might have createdAt)
+      tokenData = await this.messageTokenRepository.query(
+        `SELECT "messageId" 
+         FROM "whatsapp_message_tokens" 
+         WHERE "phoneNumber" = $1 AND "isProcessed" = false 
+         ORDER BY "createdAt" DESC 
+         LIMIT 1`,
+        [normalizedPhone],
+      );
+    }
 
     if (tokenData && tokenData.length > 0) {
       return this.handleButtonResponseByMessageId(
@@ -739,10 +811,16 @@ export class WhatsAppService {
     templateName?: string,
   ): Promise<void> {
     try {
+      this.logger.log(
+        `📝 [WhatsApp] Storing message token - Message ID: ${messageId}, Participant: ${participantId}, Phone: ${phoneNumber}, Template: ${templateName || 'N/A'}`,
+      );
+      
+      // Use DEFAULT for timestamp columns to avoid column name mismatch issues
+      // This works whether the column is named "created_at" or "createdAt"
       await this.messageTokenRepository.query(
         `INSERT INTO "whatsapp_message_tokens" 
-         ("messageId", "participantId", "eventId", "phoneNumber", "templateName", "isProcessed", "created_at", "updated_at") 
-         VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW()) 
+         ("messageId", "participantId", "eventId", "phoneNumber", "templateName", "isProcessed") 
+         VALUES ($1, $2, $3, $4, $5, $6) 
          ON CONFLICT ("messageId") DO NOTHING`,
         [
           messageId,
@@ -753,14 +831,18 @@ export class WhatsAppService {
           false, // Changed from true to false - message not yet processed
         ],
       );
+      
       this.logger.log(
-        `Stored message token ${messageId} for participant ${participantId}`,
+        `✅ [WhatsApp] Message token stored successfully - Message ID: ${messageId}`,
       );
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';
       this.logger.error(
-        `Failed to store message token: ${errorMessage}`,
+        `❌ [WhatsApp] Failed to store message token - Message ID: ${messageId}, Error: ${errorMessage}`,
+      );
+      this.logger.error(
+        `[WhatsApp] Stack trace:`,
         error instanceof Error ? error.stack : undefined,
       );
       // Don't throw - we don't want to fail message sending if token storage fails
@@ -777,6 +859,10 @@ export class WhatsAppService {
     templateName: string;
   } | null> {
     try {
+      this.logger.log(
+        `🔍 [WhatsApp] Looking up participant by message ID: ${messageId}`,
+      );
+      
       const tokenData = await this.messageTokenRepository.query(
         `SELECT "participantId", "eventId", "phoneNumber", "templateName" 
          FROM "whatsapp_message_tokens" 
@@ -786,8 +872,15 @@ export class WhatsAppService {
       );
 
       if (!tokenData || tokenData.length === 0) {
+        this.logger.warn(
+          `⚠️ [WhatsApp] No participant found for message ID: ${messageId}`,
+        );
         return null;
       }
+
+      this.logger.log(
+        `✅ [WhatsApp] Found participant - ID: ${tokenData[0].participantId}, Phone: ${tokenData[0].phoneNumber}, Template: ${tokenData[0].templateName}`,
+      );
 
       return {
         participantId: tokenData[0].participantId,
@@ -799,7 +892,10 @@ export class WhatsAppService {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';
       this.logger.error(
-        `Failed to find participant by message ID: ${errorMessage}`,
+        `❌ [WhatsApp] Failed to find participant by message ID: ${messageId}, Error: ${errorMessage}`,
+      );
+      this.logger.error(
+        `[WhatsApp] Stack trace:`,
         error instanceof Error ? error.stack : undefined,
       );
       return null;
@@ -815,21 +911,35 @@ export class WhatsAppService {
     attendingStatus: string,
   ): Promise<void> {
     try {
-      await this.participantRepository.query(
+      this.logger.log(
+        `📝 [WhatsApp] Updating attending status - Participant: ${participantId}, Event: ${eventId}, Status: ${attendingStatus}`,
+      );
+      
+      const result = await this.participantRepository.query(
         `UPDATE "event_participants" 
          SET attending = $1 
          WHERE id = $2 AND "eventId" = $3 
          RETURNING *`,
         [attendingStatus, participantId, eventId],
       );
-      this.logger.log(
-        `Updated attending status for participant ${participantId} to "${attendingStatus}"`,
-      );
+      
+      if (result && result.length > 0) {
+        this.logger.log(
+          `✅ [WhatsApp] Successfully updated attending status for participant ${participantId} to "${attendingStatus}"`,
+        );
+      } else {
+        this.logger.warn(
+          `⚠️ [WhatsApp] No rows updated for participant ${participantId} - participant may not exist`,
+        );
+      }
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';
       this.logger.error(
-        `Failed to update attending status: ${errorMessage}`,
+        `❌ [WhatsApp] Failed to update attending status - Participant: ${participantId}, Error: ${errorMessage}`,
+      );
+      this.logger.error(
+        `[WhatsApp] Stack trace:`,
         error instanceof Error ? error.stack : undefined,
       );
       throw error;
@@ -841,17 +951,30 @@ export class WhatsAppService {
    */
   async markMessageTokenAsProcessed(messageId: string): Promise<void> {
     try {
+      this.logger.log(
+        `📝 [WhatsApp] Marking message token as processed: ${messageId}`,
+      );
+      
+      // Update without specifying updated_at to avoid column name issues
+      // The column will use its default or trigger if configured
       await this.messageTokenRepository.query(
         `UPDATE "whatsapp_message_tokens" 
-         SET "isProcessed" = true, "updated_at" = NOW() 
+         SET "isProcessed" = true 
          WHERE "messageId" = $1`,
         [messageId],
+      );
+      
+      this.logger.log(
+        `✅ [WhatsApp] Message token marked as processed: ${messageId}`,
       );
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';
       this.logger.error(
-        `Failed to mark message token as processed: ${errorMessage}`,
+        `❌ [WhatsApp] Failed to mark message token as processed: ${messageId}, Error: ${errorMessage}`,
+      );
+      this.logger.error(
+        `[WhatsApp] Stack trace:`,
         error instanceof Error ? error.stack : undefined,
       );
     }
@@ -862,17 +985,27 @@ export class WhatsAppService {
    */
   async deleteMessageToken(messageId: string): Promise<void> {
     try {
+      this.logger.log(
+        `🗑️ [WhatsApp] Deleting message token: ${messageId}`,
+      );
+      
       await this.messageTokenRepository.query(
         `DELETE FROM "whatsapp_message_tokens" 
          WHERE "messageId" = $1`,
         [messageId],
       );
-      this.logger.log(`Deleted message token ${messageId} from database`);
+      
+      this.logger.log(
+        `✅ [WhatsApp] Message token deleted successfully: ${messageId}`,
+      );
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';
       this.logger.error(
-        `Failed to delete message token: ${errorMessage}`,
+        `❌ [WhatsApp] Failed to delete message token: ${messageId}, Error: ${errorMessage}`,
+      );
+      this.logger.error(
+        `[WhatsApp] Stack trace:`,
         error instanceof Error ? error.stack : undefined,
       );
     }
@@ -886,8 +1019,16 @@ export class WhatsAppService {
     phoneNumber: string,
   ): Promise<void> {
     try {
+      this.logger.log(
+        `🔍 [WhatsApp] Finding participant and storing status token - Message: ${messageId}, Phone: ${phoneNumber}`,
+      );
+      
       // Find participant by phone number
       const normalizedPhone = phoneNumber.replace(/[^\d+]/g, '');
+      
+      this.logger.log(
+        `[WhatsApp] Normalized phone number: ${normalizedPhone}`,
+      );
 
       let participant = await this.participantRepository.query(
         `SELECT id, "eventId", "phoneNumber" 
@@ -904,6 +1045,11 @@ export class WhatsAppService {
         const phoneWithPlus = normalizedPhone.startsWith('+')
           ? normalizedPhone
           : `+${normalizedPhone}`;
+        
+        this.logger.log(
+          `[WhatsApp] First lookup failed, trying with plus prefix: ${phoneWithPlus}`,
+        );
+        
         participant = await this.participantRepository.query(
           `SELECT id, "eventId", "phoneNumber" 
            FROM "event_participants" 
@@ -917,6 +1063,11 @@ export class WhatsAppService {
 
       if (participant && participant.length > 0) {
         const participantData = participant[0];
+        
+        this.logger.log(
+          `✅ [WhatsApp] Found participant - ID: ${participantData.id}, Event: ${participantData.eventId}`,
+        );
+        
         // Store token temporarily
         await this.storeMessageToken(
           messageId,
@@ -925,19 +1076,23 @@ export class WhatsAppService {
           normalizedPhone,
           'status_update',
         );
+        
         this.logger.log(
-          `Stored status token ${messageId} temporarily for participant ${participantData.id}`,
+          `✅ [WhatsApp] Status token stored successfully for participant ${participantData.id}`,
         );
       } else {
         this.logger.warn(
-          `No participant found for phone ${phoneNumber}, cannot store status token`,
+          `⚠️ [WhatsApp] No participant found for phone ${phoneNumber} (normalized: ${normalizedPhone}), cannot store status token`,
         );
       }
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';
       this.logger.error(
-        `Failed to find and store status token: ${errorMessage}`,
+        `❌ [WhatsApp] Failed to find and store status token - Message: ${messageId}, Phone: ${phoneNumber}, Error: ${errorMessage}`,
+      );
+      this.logger.error(
+        `[WhatsApp] Stack trace:`,
         error instanceof Error ? error.stack : undefined,
       );
     }

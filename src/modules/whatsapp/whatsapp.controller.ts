@@ -44,7 +44,7 @@ export class WhatsAppController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   async sendTemplate(@Body() body: TemplateRequestBody) {
     this.logger.log(
-      `Received template send request for ${body.to} with template ${body.template.name}`,
+      `📨 [WhatsApp Controller] Received template send request - To: ${body.to}, Template: ${body.template.name}`,
     );
 
     // Build payload matching WhatsApp API format exactly
@@ -78,34 +78,33 @@ export class WhatsAppController {
     const VERIFY_TOKEN =
       process.env.WA_WEBHOOK_VERIFY_TOKEN || 'miosync_webhook_verify_token';
 
-    this.logger.log('🔍 Webhook Verification Triggered', {
-      mode,
-      token,
-      challenge,
-    });
+    this.logger.log('🔍 [WhatsApp Controller] Webhook Verification Triggered');
+    this.logger.log(`   - Mode: ${mode}`);
+    this.logger.log(`   - Token: ${token ? '[PROVIDED]' : '[MISSING]'}`);
+    this.logger.log(`   - Challenge: ${challenge ? '[PROVIDED]' : '[MISSING]'}`);
 
     if (mode === 'subscribe' && token === VERIFY_TOKEN) {
-      this.logger.log('✅ Webhook Verified Successfully');
+      this.logger.log('✅ [WhatsApp Controller] Webhook Verified Successfully');
       return res.status(200).send(challenge);
     }
 
-    this.logger.error('❌ Webhook Verification Failed', {
-      mode,
-      token,
-      expected: VERIFY_TOKEN,
-    });
+    this.logger.error('❌ [WhatsApp Controller] Webhook Verification Failed');
+    this.logger.error(`   - Provided Mode: ${mode}`);
+    this.logger.error(`   - Token Match: ${token === VERIFY_TOKEN ? 'YES' : 'NO'}`);
     return res.status(403).send('Forbidden');
   }
 
   @Post('webhook')
   handleWebhook(@Body() body: WhatsAppWebhookPayload, @Res() res: Response) {
     try {
-      this.logger.log('✅ Webhook event received');
+      this.logger.log('✅ [WhatsApp Controller] Webhook event received');
 
       if (!body?.entry || !Array.isArray(body.entry)) {
-        this.logger.error('❌ Invalid webhook payload');
+        this.logger.error('❌ [WhatsApp Controller] Invalid webhook payload');
         return res.sendStatus(200);
       }
+      
+      this.logger.log(`[WhatsApp Controller] Processing ${body.entry.length} entries`);
 
       for (const entry of body.entry) {
         const changes = entry?.changes;
@@ -114,7 +113,7 @@ export class WhatsAppController {
         for (const change of changes) {
           if (!change?.field) continue;
 
-          this.logger.log(`📌 Change detected: ${change.field}`);
+          this.logger.log(`📌 [WhatsApp Controller] Change detected: ${change.field}`);
 
           const messages = change.value?.messages;
           if (Array.isArray(messages)) {
@@ -142,13 +141,12 @@ export class WhatsAppController {
 
                 // Only process if button text is "Yes" or "No"
                 if (buttonText === 'Yes' || buttonText === 'No') {
-                  this.logger.log('📱 WhatsApp Button Response Received', {
-                    phoneNumber,
-                    messageId: msg.id,
-                    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-                    contextMessageId,
-                    buttonText,
-                  });
+                  this.logger.log('📱 [WhatsApp Controller] Button Response Received:');
+                  this.logger.log(`   - Phone: ${phoneNumber}`);
+                  this.logger.log(`   - Message ID: ${msg.id}`);
+                  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+                  this.logger.log(`   - Context Message ID: ${contextMessageId}`);
+                  this.logger.log(`   - Button Text: ${buttonText}`);
 
                   // Use context.id (original message ID) to find participant
                   if (
@@ -166,7 +164,7 @@ export class WhatsAppController {
                             const attendingStatus =
                               buttonText === 'Yes' ? 'Yes' : 'No';
                             this.logger.log(
-                              `Found participant ${tokenData.participantId} for message ${contextMessageId}, updating attending to ${attendingStatus}`,
+                              `✅ [WhatsApp Controller] Found participant ${tokenData.participantId} for message ${contextMessageId}, updating attending to ${attendingStatus}`,
                             );
                             void this.whatsappService
                               .updateParticipantAttending(
@@ -187,19 +185,19 @@ export class WhatsAppController {
                               });
                           } else {
                             this.logger.warn(
-                              `No participant found for context message ID: ${contextMessageId}`,
+                              `⚠️ [WhatsApp Controller] Template is not booking_confirmation: ${tokenData?.templateName}`,
                             );
                           }
                         }
                       })
                       .catch((error: unknown) => {
                         this.logger.error(
-                          `Failed to find participant by message ID: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                          `❌ [WhatsApp Controller] Failed to find participant by message ID: ${error instanceof Error ? error.message : 'Unknown error'}`,
                         );
                       });
                   } else {
                     this.logger.warn(
-                      `No context message ID found for button response from ${phoneNumber}`,
+                      `⚠️ [WhatsApp Controller] No context message ID found for button response from ${phoneNumber}`,
                     );
                   }
                 }
@@ -215,12 +213,11 @@ export class WhatsAppController {
                 ) {
                   const buttonResponse = interactive.button_reply;
 
-                  this.logger.log('📱 WhatsApp Button Response Received', {
-                    phoneNumber,
-                    messageId: msg.id,
-                    buttonId: buttonResponse.id,
-                    buttonTitle: buttonResponse.title,
-                  });
+                  this.logger.log('📱 [WhatsApp Controller] Interactive Button Response Received:');
+                  this.logger.log(`   - Phone: ${phoneNumber}`);
+                  this.logger.log(`   - Message ID: ${msg.id}`);
+                  this.logger.log(`   - Button ID: ${buttonResponse.id}`);
+                  this.logger.log(`   - Button Title: ${buttonResponse.title}`);
 
                   // Handle button response (this will update the DB)
                   void this.whatsappService
@@ -231,9 +228,11 @@ export class WhatsAppController {
                     )
                     .catch((error: unknown) => {
                       this.logger.error(
-                        `Failed to process button response: ${error instanceof Error ? error.message : 'Unknown error'}`,
-                        error instanceof Error ? error.stack : undefined,
+                        `❌ [WhatsApp Controller] Failed to process button response: ${error instanceof Error ? error.message : 'Unknown error'}`,
                       );
+                      if (error instanceof Error && error.stack) {
+                        this.logger.error('[WhatsApp Controller] Stack trace:', error.stack);
+                      }
                     });
                 }
               } else {
@@ -241,11 +240,10 @@ export class WhatsAppController {
                 const text = msg.text?.body;
                 const from = msg.from;
 
-                this.logger.log('📩 Incoming Message', {
-                  from,
-                  type: msg.type,
-                  text: text ?? '(Not text message)',
-                });
+                this.logger.log('📩 [WhatsApp Controller] Incoming Message:');
+                this.logger.log(`   - From: ${from}`);
+                this.logger.log(`   - Type: ${msg.type}`);
+                this.logger.log(`   - Text: ${text ?? '(Not text message)'}`);
 
                 if (text && from) {
                   this.whatsappService.handleIncomingTextMessage(from, text);
@@ -267,8 +265,33 @@ export class WhatsAppController {
             for (const status of statuses) {
               const messageId = status.id;
               const recipientId = status.recipient_id;
+              const messageStatus = status.status; // 'sent' | 'delivered' | 'read' | 'failed'
 
-              this.logger.log(`Message ID from status: ${messageId}`);
+              // Log the actual delivery status
+              const statusEmoji =
+                messageStatus === 'sent'
+                  ? '📤'
+                  : messageStatus === 'delivered'
+                    ? '✅'
+                    : messageStatus === 'read'
+                      ? '👁️'
+                      : messageStatus === 'failed'
+                        ? '❌'
+                        : '📱';
+
+              this.logger.log(
+                `${statusEmoji} [WhatsApp Controller] Message ${messageStatus.toUpperCase()} - Message ID: ${messageId}, Recipient: ${recipientId}`,
+              );
+
+              // If failed, log error details
+              if (messageStatus === 'failed' && status.errors) {
+                this.logger.error(
+                  `❌ [WhatsApp Controller] Message FAILED to deliver - Message ID: ${messageId}, Recipient: ${recipientId}`,
+                );
+                this.logger.error(
+                  `❌ [WhatsApp Controller] Error Details: ${JSON.stringify(status.errors, null, 2)}`,
+                );
+              }
 
               if (messageId && recipientId) {
                 // Check if token already exists
@@ -282,20 +305,20 @@ export class WhatsAppController {
                         '',
                       );
                       this.logger.log(
-                        `Token not found for message ${messageId}, finding participant by phone ${normalizedPhone} to store temporarily`,
+                        `🔍 [WhatsApp Controller] Token not found for message ${messageId}, finding participant by phone ${normalizedPhone} to store temporarily`,
                       );
                       // Find participant by phone number and store token
                       this.whatsappService
                         .findAndStoreStatusToken(messageId, normalizedPhone)
                         .catch((error: unknown) => {
                           this.logger.error(
-                            `Failed to store status token: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                            `❌ [WhatsApp Controller] Failed to store status token: ${error instanceof Error ? error.message : 'Unknown error'}`,
                           );
                         });
                     } else {
                       // Token exists, update attending status
                       this.logger.log(
-                        `Found participant ${tokenData.participantId} for message ${messageId}`,
+                        `✅ [WhatsApp Controller] Found participant ${tokenData.participantId} for message ${messageId}`,
                       );
                       this.whatsappService
                         .updateParticipantAttending(
@@ -305,14 +328,14 @@ export class WhatsAppController {
                         )
                         .catch((error: unknown) => {
                           this.logger.error(
-                            `Failed to update attending status: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                            `❌ [WhatsApp Controller] Failed to update attending status: ${error instanceof Error ? error.message : 'Unknown error'}`,
                           );
                         });
                     }
                   })
                   .catch((error: unknown) => {
                     this.logger.error(
-                      `Failed to find participant by message ID: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                      `❌ [WhatsApp Controller] Failed to find participant by message ID: ${error instanceof Error ? error.message : 'Unknown error'}`,
                     );
                   });
               }
@@ -320,20 +343,46 @@ export class WhatsAppController {
           } else if (Array.isArray(statuses) && hasMessages) {
             // Messages exist, so we already handled it - just log status
             for (const status of statuses) {
+              const messageStatus = status.status;
+              const statusEmoji =
+                messageStatus === 'sent'
+                  ? '📤'
+                  : messageStatus === 'delivered'
+                    ? '✅'
+                    : messageStatus === 'read'
+                      ? '👁️'
+                      : messageStatus === 'failed'
+                        ? '❌'
+                        : '📱';
+
               this.logger.log(
-                `Status update (messages already processed): ${status.id} - ${status.status}`,
+                `${statusEmoji} [WhatsApp Controller] Status update (messages already processed): ${status.id} - ${messageStatus.toUpperCase()}`,
               );
+
+              // If failed, log error details
+              if (messageStatus === 'failed' && status.errors) {
+                this.logger.error(
+                  `❌ [WhatsApp Controller] Message FAILED - Message ID: ${status.id}, Recipient: ${status.recipient_id}`,
+                );
+                this.logger.error(
+                  `❌ [WhatsApp Controller] Error Details: ${JSON.stringify(status.errors, null, 2)}`,
+                );
+              }
             }
           }
         }
       }
 
+      this.logger.log('✅ [WhatsApp Controller] Webhook processing completed successfully');
       return res.sendStatus(200);
     } catch (err) {
       this.logger.error(
-        '🔥 Webhook processing error:',
+        '🔥 [WhatsApp Controller] Webhook processing error:',
         err instanceof Error ? err.message : 'Unknown error',
       );
+      if (err instanceof Error && err.stack) {
+        this.logger.error('[WhatsApp Controller] Stack trace:', err.stack);
+      }
       return res.sendStatus(200);
     }
   }

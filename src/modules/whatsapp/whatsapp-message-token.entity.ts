@@ -34,9 +34,9 @@ export class WhatsAppMessageToken {
   @Column({ name: 'isProcessed', type: 'boolean', default: false })
   isProcessed: boolean;
 
-  @CreateDateColumn({ name: 'createdAt', type: 'timestamptz' })
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn({ name: 'updatedAt', type: 'timestamptz' })
+  @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
   updatedAt: Date;
 }

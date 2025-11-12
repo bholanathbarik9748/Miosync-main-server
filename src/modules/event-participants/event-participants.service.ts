@@ -396,9 +396,12 @@ export class EventParticipantsService {
         // Retry with exponential backoff and capture response
         const response = (await retryWithBackoff(async () => {
           return await this.whatsappService.sendTemplate(payload);
-        })) as { messages?: Array<{ id?: string }> } | null;
+        })) as {
+          messages?: Array<{ id?: string }>;
+          contacts?: Array<{ input?: string; wa_id?: string }>;
+        } | null;
 
-        // Extract message ID from response
+        // Extract message ID and WhatsApp ID from response
         const messageId =
           response &&
           typeof response === 'object' &&
@@ -409,35 +412,79 @@ export class EventParticipantsService {
             ? String(response.messages[0].id)
             : null;
 
-        successCount++;
-        this.logger.log(
-          `✅ [${i + 1}/${participants.length}] Message SENT to ${phoneNumber} (Participant: ${participant.name}, ID: ${participant.id})${messageId ? ` | Message ID: ${messageId}` : ''}`,
-        );
+        const waId =
+          response &&
+          typeof response === 'object' &&
+          'contacts' in response &&
+          Array.isArray(response.contacts) &&
+          response.contacts.length > 0 &&
+          response.contacts[0]?.wa_id
+            ? String(response.contacts[0].wa_id)
+            : null;
 
-        // Track successful participant
-        successfulParticipants.push({
-          id: participant.id,
-          name: String(participant.name || 'Unknown'),
-          phoneNumber,
-          messageId,
-          sentAt: new Date().toISOString(),
-        });
+        // IMPORTANT: WhatsApp API can return 200 OK with messageId even when message won't deliver
+        // This happens when app is not fully verified (24-hour messaging window)
+        // The ONLY reliable way to know if message delivered is via webhook status updates
 
-        // Store message token for tracking delivery status
-        if (messageId && typeof messageId === 'string') {
-          this.whatsappService
-            .storeMessageToken(
-              messageId,
-              participant.id,
-              eventId,
-              phoneNumber,
-              'guest_invite_id_request',
-            )
-            .catch((error: unknown) => {
-              this.logger.error(
-                `Failed to store message token for participant ${participant.id}: ${error instanceof Error ? error.message : 'Unknown error'}`,
-              );
-            });
+        if (messageId) {
+          // API accepted the message - but delivery is NOT guaranteed
+          successCount++;
+          this.logger.log(
+            `✅ [${i + 1}/${participants.length}] API ACCEPTED message - To: ${phoneNumber} (Participant: ${participant.name}, ID: ${participant.id}) | Message ID: ${messageId}${waId ? ` | WhatsApp ID: ${waId}` : ''}`,
+          );
+          this.logger.warn(
+            `⚠️ [${i + 1}/${participants.length}] WARNING: API success does NOT guarantee delivery!`,
+          );
+          this.logger.warn(
+            `⚠️ [${i + 1}/${participants.length}] If app is NOT fully verified, message may NOT deliver if user hasn't messaged you in last 24 hours`,
+          );
+          this.logger.log(
+            `📱 [${i + 1}/${participants.length}] Check webhook logs for actual delivery status ('delivered' or 'failed')`,
+          );
+        } else {
+          // API did not accept the message
+          failureCount++;
+          const errorMsg =
+            'WhatsApp API did not accept the message - check app verification status, template approval, or 24-hour messaging window';
+          this.logger.error(
+            `❌ [${i + 1}/${participants.length}] ${errorMsg} (Participant: ${participant.name}, ID: ${participant.id})`,
+          );
+          failedParticipants.push({
+            id: participant.id,
+            phoneNumber,
+            error: errorMsg,
+          });
+          continue; // Skip storing token for failed messages
+        }
+
+        // Store token for tracking delivery status via webhook
+        // Even if API accepted, we need webhook to confirm actual delivery
+        if (messageId) {
+          // Track successful participant
+          successfulParticipants.push({
+            id: participant.id,
+            name: String(participant.name || 'Unknown'),
+            phoneNumber,
+            messageId,
+            sentAt: new Date().toISOString(),
+          });
+
+          // Store message token for tracking delivery status
+          if (messageId && typeof messageId === 'string') {
+            this.whatsappService
+              .storeMessageToken(
+                messageId,
+                participant.id,
+                eventId,
+                phoneNumber,
+                'guest_invite_id_request',
+              )
+              .catch((error: unknown) => {
+                this.logger.error(
+                  `Failed to store message token for participant ${participant.id}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                );
+              });
+          }
         }
 
         // Add delay between messages to respect rate limits (1.5 seconds)
