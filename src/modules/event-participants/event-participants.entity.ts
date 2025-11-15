@@ -67,4 +67,7 @@ export class EventParticipant {
 
   @Column({ type: 'timestamptz', nullable: true })
   reminderSentAt: Date | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  reminder3HoursSentAt: Date | null;
 }
