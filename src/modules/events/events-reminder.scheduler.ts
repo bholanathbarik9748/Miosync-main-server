@@ -402,10 +402,6 @@ export class EventsReminderScheduler implements OnModuleInit, OnModuleDestroy {
                   type: 'text',
                   text: formattedDateTime.substring(0, 100),
                 }, // {{3}} - Date and time
-                {
-                  type: 'text',
-                  text: String(event.venue).substring(0, 100),
-                }, // {{4}} - Venue
               ],
             },
           ],
