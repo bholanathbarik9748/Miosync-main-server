@@ -15,9 +15,9 @@ import { ExternalServiceException } from '../../common/exceptions/custom.excepti
 export class EventsReminderScheduler implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(EventsReminderScheduler.name);
   private intervalId: NodeJS.Timeout | null = null;
-  // Check every 1 minute for better accuracy
-  // Since we track reminderSentAt, duplicates are prevented
-  private readonly CHECK_INTERVAL = 60 * 1000; // 1 minute
+  // Check every 12 hours
+  // Since we track reminderSentAt and reminder3HoursSentAt, duplicates are prevented
+  private readonly CHECK_INTERVAL = 12 * 60 * 60 * 1000; // 12 hours
 
   constructor(
     @InjectRepository(Event)
@@ -38,7 +38,7 @@ export class EventsReminderScheduler implements OnModuleInit, OnModuleDestroy {
       );
     });
 
-    // Set up interval to check every 1 minute
+    // Set up interval to check every 12 hours
     this.intervalId = setInterval(() => {
       void this.handleEventReminders().catch((error) => {
         const errorMessage =
@@ -51,7 +51,7 @@ export class EventsReminderScheduler implements OnModuleInit, OnModuleDestroy {
     }, this.CHECK_INTERVAL);
 
     this.logger.log(
-      `Event reminder scheduler started. Will check for events 12 hours away every ${this.CHECK_INTERVAL / 1000} second(s).`,
+      `Event reminder scheduler started. Will check for events every ${this.CHECK_INTERVAL / 1000 / 60 / 60} hour(s).`,
     );
   }
 
