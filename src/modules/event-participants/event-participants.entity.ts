@@ -64,4 +64,7 @@ export class EventParticipant {
 
   @Column({ type: 'varchar', length: 500, nullable: true })
   backDocumentUrl: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  reminderSentAt: Date | null;
 }

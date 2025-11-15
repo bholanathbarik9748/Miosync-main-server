@@ -48,7 +48,7 @@ export class EventsService {
       `INSERT INTO "events" ("eventName", "eventDateTime", "food", "venue", "isActive", "createdAt", "updatedAt") 
      VALUES ($1, $2, $3, $4, $5, NOW(), NOW()) 
      RETURNING *`,
-      [eventName, eventDateTime, food, venue, true],
+      [eventName, new Date(eventDateTime), food, venue, true],
     );
 
     if (response.length === 0) {
