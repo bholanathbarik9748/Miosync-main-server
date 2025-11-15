@@ -9,6 +9,7 @@ import { Repository } from 'typeorm';
 import { Event } from './events.entity';
 import { EventParticipant } from '../event-participants/event-participants.entity';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { ExternalServiceException } from '../../common/exceptions/custom.exception';
 
 @Injectable()
 export class EventsReminderScheduler implements OnModuleInit, OnModuleDestroy {
@@ -263,10 +264,57 @@ export class EventsReminderScheduler implements OnModuleInit, OnModuleDestroy {
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';
-      this.logger.error(
-        `Failed to send reminder to participant ${participant.id} (${participant.name}): ${errorMessage}`,
-        error instanceof Error ? error.stack : undefined,
-      );
+
+      // Check if it's an API access blocked error
+      const isApiBlocked =
+        error instanceof ExternalServiceException &&
+        (errorMessage.toLowerCase().includes('api access blocked') ||
+          errorMessage.toLowerCase().includes('access blocked'));
+
+      if (isApiBlocked) {
+        // Get WhatsApp error details if available
+        const whatsappErrorCode =
+          error instanceof ExternalServiceException &&
+          error.details &&
+          typeof error.details === 'object' &&
+          'whatsappErrorCode' in error.details
+            ? (error.details as { whatsappErrorCode?: string })
+                .whatsappErrorCode
+            : 'UNKNOWN';
+
+        this.logger.error(
+          `🚨 API ACCESS BLOCKED for participant ${participant.name} (${participant.id})`,
+        );
+        this.logger.error(`   WhatsApp Error Code: ${whatsappErrorCode}`);
+        this.logger.error(`   Event: ${event.eventName} (${event.id})`);
+        this.logger.error(
+          `   ⚠️ Reminder NOT marked as sent - will retry on next check`,
+        );
+        this.logger.error(`   Possible causes:`);
+        this.logger.error(
+          `   - WhatsApp Business API access restricted/blocked`,
+        );
+        this.logger.error(`   - Rate limiting or account issues`);
+        this.logger.error(`   - Template not approved or app not verified`);
+        this.logger.error(
+          `   - Check WhatsApp Business Manager: https://business.facebook.com/wa/manage/message-templates/`,
+        );
+      } else {
+        // Other errors - log but don't mark as sent
+        this.logger.error(
+          `Failed to send reminder to participant ${participant.id} (${participant.name}): ${errorMessage}`,
+          error instanceof Error ? error.stack : undefined,
+        );
+
+        // If it's an ExternalServiceException, log additional details
+        if (error instanceof ExternalServiceException && error.details) {
+          this.logger.error(
+            `   Error details: ${JSON.stringify(error.details, null, 2)}`,
+          );
+        }
+      }
+
+      // Don't mark reminder as sent for any error - allows retry on next check
       // Don't throw - continue with other participants
     }
   }
