@@ -5,6 +5,7 @@ import {
   Param,
   Post,
   Put,
+  Query,
   ValidationPipe,
   UseGuards,
   Version,
@@ -33,8 +34,8 @@ export class EventParticipantsController {
   @Get()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserType.SUPER_ADMIN)
-  findAll() {
-    return this.participantsService.findAll();
+  findAll(@Query('eventId') eventId?: string) {
+    return this.participantsService.findAll(eventId);
   }
 
   @Get(':id')

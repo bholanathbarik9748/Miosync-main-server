@@ -36,10 +36,21 @@ export class EventParticipantsService {
     private readonly uploadDocumentService: UploadDocumentService,
   ) {}
 
-  async findAll(): Promise<EventParticipantRow[]> {
+  async findAll(eventId?: string): Promise<EventParticipantRow[]> {
+    let query: string;
+    let parameters: string[] | undefined;
+
+    if (eventId) {
+      query = 'SELECT * FROM "event_participants" WHERE "eventId" = $1';
+      parameters = [eventId];
+    } else {
+      query = 'SELECT * FROM "event_participants"';
+      parameters = undefined;
+    }
+
     const participant = await this.participantRepository.query<
       EventParticipantRow[]
-    >('SELECT * FROM "event_participants"');
+    >(query, parameters);
 
     if (!participant || participant.length === 0) {
       throw new NotFoundException('Participant not found');
@@ -47,12 +58,13 @@ export class EventParticipantsService {
     return participant;
   }
 
-  async findOne(id: string): Promise<EventParticipantRow[]> {
-    const participant = await this.participantRepository.query<
-      EventParticipantRow[]
-    >('SELECT * FROM "event_participants" WHERE "id" = $1', [id]);
+  async findOne(id: string): Promise<any> {
+    const participant: unknown = await this.participantRepository.query(
+      'SELECT * FROM "event_participants" WHERE "id" = $1',
+      [id],
+    );
 
-    if (!participant || participant.length === 0) {
+    if (!participant) {
       throw new NotFoundException('Participant not found');
     }
     return participant;
