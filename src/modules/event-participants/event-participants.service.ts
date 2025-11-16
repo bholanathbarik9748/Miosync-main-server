@@ -397,6 +397,10 @@ export class EventParticipantsService {
                 parameters: [
                   {
                     type: 'text',
+                    text: String(participant.eventId),
+                  },
+                  {
+                    type: 'text',
                     text: String(participant.id),
                   },
                 ],
