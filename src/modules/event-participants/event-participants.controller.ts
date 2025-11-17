@@ -139,7 +139,7 @@ export class EventParticipantsController {
     return this.participantsService.update(id, eventId, body);
   }
 
-  @Post('document/:eventId/:id')
+  @Post('document/:id')
   @UseInterceptors(
     FileFieldsInterceptor(
       [
@@ -151,7 +151,6 @@ export class EventParticipantsController {
   )
   async uploadDoc(
     @Param('id') participantId: string,
-    @Param('eventId') eventId: string,
     @UploadedFiles()
     files: {
       front?: Express.Multer.File[];
@@ -175,7 +174,6 @@ export class EventParticipantsController {
 
     return await this.participantsService.uploadDocument(
       participantId,
-      eventId,
       frontImage,
       backImage,
     );

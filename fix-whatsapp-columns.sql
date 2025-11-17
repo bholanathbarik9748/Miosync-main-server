@@ -37,3 +37,4 @@ FROM information_schema.columns
 WHERE table_name = 'whatsapp_message_tokens'
 ORDER BY ordinal_position;
 
+

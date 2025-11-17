@@ -397,10 +397,6 @@ export class EventParticipantsService {
                 parameters: [
                   {
                     type: 'text',
-                    text: String(participant.eventId),
-                  },
-                  {
-                    type: 'text',
                     text: String(participant.id),
                   },
                 ],
@@ -598,7 +594,6 @@ export class EventParticipantsService {
 
   async uploadDocument(
     participantId: string,
-    eventId: string,
     frontFile: Express.Multer.File,
     backFile: Express.Multer.File,
   ): Promise<any> {
@@ -630,7 +625,21 @@ export class EventParticipantsService {
       );
     }
 
-    // Get event data to calculate autoDeleteDate
+    // Retrieve participant data first to get eventId
+    const participantData = await this.participantRepository.query<
+      EventParticipantRow[]
+    >(`SELECT * FROM "event_participants" WHERE id = $1`, [participantId]);
+
+    if (!participantData || participantData.length === 0) {
+      throw new NotFoundException(
+        `Participant with id ${participantId} not found`,
+      );
+    }
+
+    const participant = participantData[0];
+    const eventId = participant.eventId;
+
+    // Get event data to calculate autoDeleteDate and for WhatsApp message
     const eventData = (await this.eventsService.getEventData(
       eventId,
     )) as EventRow[];
@@ -668,37 +677,16 @@ export class EventParticipantsService {
     >(
       `UPDATE "event_participants"
        SET "frontDocumentUrl" = $1, "backDocumentUrl" = $2
-       WHERE id = $3 AND "eventId" = $4
+       WHERE id = $3
        RETURNING *`,
-      [
-        frontDocument.cloudinaryUrl,
-        backDocument.cloudinaryUrl,
-        participantId,
-        eventId,
-      ],
+      [frontDocument.cloudinaryUrl, backDocument.cloudinaryUrl, participantId],
     );
 
     if (!updateResult || updateResult.length === 0) {
       throw new NotFoundException(
-        `Participant with id ${participantId} not found for event ${eventId}`,
+        `Participant with id ${participantId} not found`,
       );
     }
-
-    // Retrieve full participant data to ensure we have phoneNumber
-    const participantData = await this.participantRepository.query<
-      EventParticipantRow[]
-    >(`SELECT * FROM "event_participants" WHERE id = $1 AND "eventId" = $2`, [
-      participantId,
-      eventId,
-    ]);
-
-    if (!participantData || participantData.length === 0) {
-      throw new NotFoundException(
-        `Participant with id ${participantId} not found for event ${eventId}`,
-      );
-    }
-
-    const participant = participantData[0];
 
     // Send WhatsApp booking confirmation message if participant has phone number
     if (participant.phoneNumber) {
