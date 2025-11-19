@@ -271,7 +271,7 @@ export class EventsReminderScheduler implements OnModuleInit, OnModuleDestroy {
         to: phoneNumber,
         type: 'template',
         template: {
-          name: 'your_event_schedule',
+          name: 'your_event_schedule_main',
           language: { code: 'en' },
           components: [
             {
@@ -384,7 +384,7 @@ export class EventsReminderScheduler implements OnModuleInit, OnModuleDestroy {
         to: phoneNumber,
         type: 'template',
         template: {
-          name: 'reminder_event',
+          name: 'reminder_event_main',
           language: { code: 'en' },
           components: [
             {
